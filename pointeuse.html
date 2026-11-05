@@ -93,6 +93,10 @@
   // Présents (prénoms des salariés en service), comme sur la pointeuse de la v16.
   async function presents() { try { const l = await sb.rpc('presents_tablette'); $('#presents').textContent = l.length ? 'En service : ' + l.join(', ') : 'Personne en service pour le moment'; } catch (e) { /* */ } }
   presents(); setInterval(presents, 60000);
+  // Écran toujours allumé sur la tablette (comme la v16), quand le navigateur le permet.
+  let verrouEcran = null;
+  const garderEcran = async () => { try { if ('wakeLock' in navigator && !verrouEcran && document.visibilityState === 'visible') { verrouEcran = await navigator.wakeLock.request('screen'); verrouEcran.addEventListener('release', () => { verrouEcran = null; }); } } catch (e) { /* refusé : sans gravité */ } };
+  garderEcran(); document.addEventListener('visibilitychange', garderEcran);
   let ident = null, codeSaisi = '', minuteurAccueil, confirmer = null;
   // 1. Le code est vérifié par le serveur : prénom, service prévu, sens suggéré (rien n'est encore enregistré).
   async function demanderSens() {
