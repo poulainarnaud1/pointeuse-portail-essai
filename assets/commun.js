@@ -71,8 +71,19 @@
     if (!membre) { location.replace('index.html?raison=role'); return null; }
     const [etab] = await sb.lire('etablissements', { select: 'id,nom,reglages', id: 'eq.' + membre.etab_id });
     appliquerIdentite(etab);
+    suivreErreurs();
     if (membre.role !== 'tablette') surveillerInactivite();
     return { user: sb.utilisateur, membre, etab };
+  }
+
+  // Suivi des erreurs : les erreurs imprévues de la page sont signalées au serveur (page + message court, sans données
+  // saisies) et apparaissent au dirigeant dans Réglages > État du service. 5 envois au plus par page ouverte.
+  function suivreErreurs() {
+    let restant = 5;
+    const page = location.pathname.split('/').pop() || 'index.html';
+    const envoyer = m => { if (restant-- > 0 && sb.session) sb.rpc('signaler_erreur', { p_page: page, p_message: String(m).slice(0, 300) }).catch(() => {}); };
+    addEventListener('error', e => envoyer((e.message || 'erreur') + (e.lineno ? ' (ligne ' + e.lineno + ')' : '')));
+    addEventListener('unhandledrejection', e => envoyer('promesse rejetée : ' + ((e.reason && e.reason.message) || e.reason)));
   }
 
   // Déconnexion automatique après une période sans activité.

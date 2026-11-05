@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Espace dirigeant — Portail de pointage</title>
-<link rel="stylesheet" href="assets/style.css?v=4">
+<link rel="stylesheet" href="assets/style.css?v=5">
 </head>
 <body>
 <header class="tete">
@@ -26,9 +26,9 @@
 </header>
 <main class="enveloppe"><div class="pile" id="vue"><p class="doux">Chargement…</p></div></main>
 
-<script src="assets/config.js?v=4"></script>
-<script src="assets/sb.js?v=4"></script>
-<script src="assets/commun.js?v=4"></script>
+<script src="assets/config.js?v=5"></script>
+<script src="assets/sb.js?v=5"></script>
+<script src="assets/commun.js?v=5"></script>
 <script>
 (async function () {
   const { $, esc, heure, dateCourte, dateLongue, ajouterJours, lundi, aujourdhui, hm, duree, messageErreur, toast, formulaire } = P;
@@ -390,7 +390,14 @@
       <div class="carte pile"><h2 style="margin:0">Sauvegardes</h2><div id="etatSauv" class="doux petit">Chargement…</div>
         <div class="ligne"><button class="bouton second" id="telecharger">Télécharger une sauvegarde complète</button>
         <label class="bouton discret" style="cursor:pointer">Restaurer depuis un fichier…<input type="file" id="fichierRest" accept="application/json,.json" class="cache"></label></div>
-        <p class="doux petit" style="margin:0">Le fichier téléchargé contient des données personnelles (salariés, pointages, justificatifs) : rangez-le en lieu sûr. Une restauration commence toujours par une sauvegarde de l\u2019état actuel, et conserve par défaut les pointages enregistrés après la date de la sauvegarde.</p></div>`;
+        <p class="doux petit" style="margin:0">Le fichier téléchargé contient des données personnelles (salariés, pointages, justificatifs) : rangez-le en lieu sûr. Une restauration commence toujours par une sauvegarde de l\u2019état actuel, et conserve par défaut les pointages enregistrés après la date de la sauvegarde.</p></div>
+      <div class="carte pile"><h2 style="margin:0">État du service</h2><div id="etatServ" class="doux petit">Chargement…</div></div>`;
+    sb.rpc('etat_service', { p_etab: etabId }).then(s => {
+      const nomT = { 'analyser-alertes': 'Calcul des alertes (toutes les 10 min)', 'sauvegarde-nocturne': 'Sauvegarde de la nuit' };
+      const t = (s.taches || []).map(x => `${esc(nomT[x.tache] || x.tache)} : ${x.dernier_passage ? esc(new Date(x.dernier_passage).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' })) + ' — ' + (x.statut === 'succeeded' ? 'réussi' : '<b style="color:var(--mauvais)">' + esc(x.statut || '') + '</b>') : 'pas encore passée'}`).join('<br>');
+      const er = (s.dernieres_erreurs || []).slice(0, 5).map(x => `<li>${esc(new Date(x.le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }))} · ${esc(x.origine)}${x.page ? ' · ' + esc(x.page) : ''} : ${esc(x.message)}</li>`).join('');
+      $('#etatServ').innerHTML = `${t}<br>Échecs des tâches sur 7 jours : ${s.echecs_taches_7j} · erreurs signalées sur 7 jours : ${s.erreurs_7j}` + (er ? `<ul style="margin:.4em 0 0 1.2em;padding:0">${er}</ul>` : '');
+    }).catch(x => { $('#etatServ').textContent = messageErreur(x); });
     sb.fonction('sauvegarde', { action: 'etat', etab_id: etabId }).then(e => {
       const d = (e.suivi || []).find(x => x.type === 'automatique');
       $('#etatSauv').innerHTML = (d ? `Dernière sauvegarde automatique : ${esc(new Date(d.le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }))} \u2014 ${d.ok ? 'réussie' : '<b style="color:var(--mauvais)">échec : ' + esc(d.erreur || '') + '</b>'}` : 'Aucune sauvegarde automatique pour l\u2019instant.')
