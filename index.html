@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connexion — Portail de pointage</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main class="accueil">
+  <form class="carte" id="f" novalidate>
+    <h1 id="nom">Portail de pointage</h1>
+    <p class="doux petit" style="text-align:center;margin:0">Connectez-vous à votre espace.</p>
+    <div id="msg" class="message cache" role="alert"></div>
+    <label class="champ">Adresse e-mail
+      <input type="email" id="email" autocomplete="username" required>
+    </label>
+    <label class="champ">Mot de passe
+      <input type="password" id="mdp" autocomplete="current-password" required>
+    </label>
+    <button class="bouton" id="ok" type="submit">Se connecter</button>
+    <a href="oubli.html" class="petit" style="text-align:center">Mot de passe oublié ?</a>
+  </form>
+</main>
+<script src="assets/config.js"></script>
+<script src="assets/sb.js"></script>
+<script src="assets/commun.js"></script>
+<script>
+(function () {
+  const { $, messageErreur } = P;
+  P.bandeauEssai();
+  $('#nom').textContent = CONFIG.nomParDefaut;
+  document.documentElement.style.setProperty('--accent', CONFIG.couleurParDefaut);
+  const raisons = { inactivite: 'Vous avez été déconnecté après une période d’inactivité.', session: 'Votre session a expiré : reconnectez-vous.',
+                    role: 'Ce compte n’a pas accès à cet espace.', desactive: 'Ce compte est désactivé.' };
+  const r = new URLSearchParams(location.search).get('raison');
+  const msg = (t, type) => { const m = $('#msg'); m.textContent = t; m.className = 'message ' + (type || 'erreur'); };
+  if (raisons[r]) msg(raisons[r], 'info');
+
+  async function aiguiller() {
+    const membres = await sb.lire('membres', { select: 'role', user_id: 'eq.' + sb.utilisateur.id, actif: 'eq.true' });
+    const roles = membres.map(m => m.role);
+    if (roles.includes('dirigeant')) location.replace('dirigeant.html');
+    else if (roles.includes('salarie')) location.replace('salarie.html');
+    else if (roles.includes('tablette')) location.replace('pointeuse.html');
+    else { await sb.deconnexion(); msg('Ce compte n’est rattaché à aucun établissement actif.'); }
+  }
+  if (sb.session && !r) { sb.moi().then(aiguiller).catch(() => sb.deconnexion()); }
+
+  $('#f').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = $('#email').value, mdp = $('#mdp').value;
+    if (!email || !mdp) return msg('Saisissez votre adresse e-mail et votre mot de passe.');
+    $('#ok').disabled = true; $('#ok').textContent = 'Connexion…';
+    try { await sb.connexion(email, mdp); await aiguiller(); }
+    catch (err) { msg(messageErreur(err)); }
+    finally { $('#ok').disabled = false; $('#ok').textContent = 'Se connecter'; }
+  });
+})();
+</script>
+</body>
+</html>

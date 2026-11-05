@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Choisir mon mot de passe — Portail de pointage</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main class="accueil">
+  <form class="carte" id="f" novalidate>
+    <h1 id="titre">Choisir mon mot de passe</h1>
+    <div id="msg" class="message cache" role="alert"></div>
+    <div id="formulaire" class="pile cache">
+      <p class="doux petit" style="margin:0">Au moins 10 caractères, avec des lettres et des chiffres. Ce mot de passe sert à votre espace personnel ; il est différent de votre code de pointage.</p>
+      <label class="champ">Nouveau mot de passe
+        <input type="password" id="mdp1" autocomplete="new-password" minlength="10" required>
+      </label>
+      <label class="champ">Confirmer le mot de passe
+        <input type="password" id="mdp2" autocomplete="new-password" minlength="10" required>
+      </label>
+      <button class="bouton" id="ok" type="submit">Enregistrer</button>
+    </div>
+    <a href="index.html" class="petit" style="text-align:center">Aller à la connexion</a>
+  </form>
+</main>
+<script src="assets/config.js"></script>
+<script src="assets/sb.js"></script>
+<script src="assets/commun.js"></script>
+<script>
+(async function () {
+  const { $, messageErreur, controleMotDePasse } = P;
+  P.bandeauEssai();
+  document.documentElement.style.setProperty('--accent', CONFIG.couleurParDefaut);
+  const msg = (t, type) => { const m = $('#msg'); m.textContent = t; m.className = 'message ' + (type || 'erreur'); };
+  const q = new URLSearchParams(location.search);
+  const type = q.get('type') === 'recovery' ? 'recovery' : 'invite';
+  $('#titre').textContent = type === 'recovery' ? 'Nouveau mot de passe' : 'Activer mon compte';
+
+  // 1. Lien remis par le responsable (?token_hash=…) ou lien de l'e-mail (#access_token=…).
+  try {
+    const fragErr = new URLSearchParams(location.hash.slice(1)).get('error_code');
+    if (fragErr) throw { code: fragErr };
+    if (q.get('token_hash')) {
+      await sb.verifierJeton(q.get('token_hash'), type);
+      history.replaceState(null, '', location.pathname + '?type=' + type);
+    } else if (!sb.sessionDepuisAdresse() && !sb.session) {
+      throw { code: 'otp_expired' };
+    }
+    await sb.moi();
+    $('#formulaire').classList.remove('cache');
+  } catch (e) {
+    msg(messageErreur(e) + ' Votre responsable peut vous remettre un nouveau lien.');
+    return;
+  }
+
+  // 2. Choix du mot de passe.
+  $('#f').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = controleMotDePasse($('#mdp1').value, $('#mdp2').value);
+    if (err) return msg(err);
+    $('#ok').disabled = true;
+    try {
+      await sb.changerMotDePasse($('#mdp1').value);
+      $('#formulaire').classList.add('cache');
+      msg('Mot de passe enregistré. Vous allez être dirigé vers votre espace.', 'ok');
+      setTimeout(() => location.replace('index.html'), 1500);
+    } catch (e2) { msg(messageErreur(e2)); $('#ok').disabled = false; }
+  });
+})();
+</script>
+</body>
+</html>

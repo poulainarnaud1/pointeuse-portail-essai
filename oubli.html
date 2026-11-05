@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mot de passe oublié — Portail de pointage</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main class="accueil">
+  <form class="carte" id="f" novalidate>
+    <h1>Mot de passe oublié</h1>
+    <p class="doux petit" style="margin:0">Saisissez l'adresse e-mail de votre compte. Vous recevrez un lien pour choisir un nouveau mot de passe. Le lien ne sert qu'une fois et expire au bout d'une heure.</p>
+    <div id="msg" class="message cache" role="alert"></div>
+    <label class="champ">Adresse e-mail
+      <input type="email" id="email" autocomplete="username" required>
+    </label>
+    <button class="bouton" id="ok" type="submit">Recevoir le lien</button>
+    <p class="doux petit" style="margin:0">Pas d'adresse e-mail, ou rien reçu ? Votre responsable peut vous remettre un lien depuis son espace.</p>
+    <a href="index.html" class="petit" style="text-align:center">Retour à la connexion</a>
+  </form>
+</main>
+<script src="assets/config.js"></script>
+<script src="assets/sb.js"></script>
+<script src="assets/commun.js"></script>
+<script>
+(function () {
+  const { $, messageErreur } = P;
+  P.bandeauEssai();
+  document.documentElement.style.setProperty('--accent', CONFIG.couleurParDefaut);
+  const msg = (t, type) => { const m = $('#msg'); m.textContent = t; m.className = 'message ' + (type || 'erreur'); };
+  $('#f').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = $('#email').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return msg('Adresse e-mail invalide.');
+    $('#ok').disabled = true;
+    try {
+      const retour = new URL('activer.html?type=recovery', location.href).href;
+      await sb.demanderReinitialisation(email, retour);
+      // Même message que l'adresse existe ou non : on ne révèle pas quels comptes existent.
+      msg('Si un compte correspond à cette adresse, un e-mail vient d’être envoyé. Pensez à regarder dans les indésirables.', 'ok');
+    } catch (err) {
+      if (err.statut === 429 || err.code === 'over_email_send_rate_limit') msg(messageErreur(err));
+      else msg('Si un compte correspond à cette adresse, un e-mail vient d’être envoyé. Pensez à regarder dans les indésirables.', 'ok');
+    } finally { $('#ok').disabled = false; }
+  });
+})();
+</script>
+</body>
+</html>

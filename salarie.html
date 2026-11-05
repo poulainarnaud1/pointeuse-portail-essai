@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mon espace — Portail de pointage</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="tete">
+  <div class="enveloppe">
+    <h1 id="nomEtab">Mon espace</h1>
+    <span class="qui" id="qui"></span>
+    <button class="bouton discret petit" id="deco">Se déconnecter</button>
+  </div>
+  <nav class="onglets enveloppe" role="tablist" id="onglets">
+    <button role="tab" data-o="planning" aria-selected="true">Planning</button>
+    <button role="tab" data-o="heures">Pointages et heures</button>
+    <button role="tab" data-o="notifs">Notifications <span class="pastille cache" id="nbNotifs"></span></button>
+    <button role="tab" data-o="demandes">Congés et absences</button>
+    <button role="tab" data-o="infos">Mes informations</button>
+  </nav>
+</header>
+<main class="enveloppe"><div class="pile" id="vue"><p class="doux">Chargement…</p></div></main>
+
+<script src="assets/config.js"></script>
+<script src="assets/sb.js"></script>
+<script src="assets/commun.js"></script>
+<script>
+(async function () {
+  const { $, esc, heure, dateLongue, dateCourte, ajouterJours, lundi, aujourdhui, hm, duree, messageErreur, toast } = P;
+  const ctx = await P.garde(['salarie']);
+  if (!ctx) return;
+  const moiId = ctx.membre.salarie_id, etabId = ctx.membre.etab_id;
+  $('#nomEtab').textContent = ctx.etab.nom;
+  const [fiche] = await sb.lire('salaries', { select: '*', id: 'eq.' + moiId });
+  $('#qui').textContent = fiche ? fiche.prenom + ' ' + fiche.nom : '';
+  $('#deco').onclick = async () => { await sb.deconnexion(); location.replace('index.html'); };
+
+  let onglet = 'planning', semaine = lundi(aujourdhui());
+  document.querySelectorAll('#onglets button').forEach(b => b.onclick = () => {
+    onglet = b.dataset.o;
+    document.querySelectorAll('#onglets button').forEach(x => x.setAttribute('aria-selected', x === b));
+    afficher();
+  });
+
+  async function compterNotifs() {
+    try {
+      const n = await sb.lire('alertes', { select: 'id', salarie_id: 'eq.' + moiId, lu: 'eq.false', annulee: 'eq.false' });
+      const p = $('#nbNotifs'); p.textContent = n.length; p.classList.toggle('cache', !n.length);
+    } catch (e) { /* sans gravité */ }
+  }
+
+  function navSemaine(titre) {
+    return `<div class="ligne entre"><h2 style="margin:0">${titre}</h2><div class="ligne">
+      <button class="bouton discret petit" data-sem="-7" aria-label="Semaine précédente">‹</button>
+      <span>Semaine du ${dateCourte(semaine)}</span>
+      <button class="bouton discret petit" data-sem="7" aria-label="Semaine suivante">›</button>
+      <button class="bouton discret petit" data-sem="0">Aujourd'hui</button></div></div>`;
+  }
+  function brancherNav() {
+    document.querySelectorAll('[data-sem]').forEach(b => b.onclick = () => {
+      const d = Number(b.dataset.sem); semaine = d ? ajouterJours(semaine, d) : lundi(aujourdhui()); afficher();
+    });
+  }
+
+  // ---------- Planning publié (les brouillons ne sont jamais transmis par la base)
+  async function vuePlanning() {
+    const fin = ajouterJours(semaine, 6);
+    const cr = await sb.lire('creneaux', { select: 'jour,debut,fin,poste,note', salarie_id: 'eq.' + moiId, and: `(jour.gte.${semaine},jour.lte.${fin})`, order: 'jour,debut' });
+    const [demandes] = [await sb.lire('demandes', { select: 'type,du,au,debut,fin,statut', salarie_id: 'eq.' + moiId, statut: 'eq.acceptee', du: 'lte.' + fin, au: 'gte.' + semaine })];
+    let html = `<div class="carte">${navSemaine('Mon planning')}</div><div class="jours">`;
+    for (let i = 0; i < 7; i++) {
+      const j = ajouterJours(semaine, i);
+      const c = cr.filter(x => x.jour === j);
+      const conge = demandes.filter(d => d.du <= j && d.au >= j);
+      html += `<div class="jour ${j === aujourdhui() ? 'aujourdhui' : ''}"><b>${esc(dateCourte(j))}</b>
+        ${c.map(x => `<div class="creneau">${hm(x.debut)}–${hm(x.fin)}${hm(x.fin) <= hm(x.debut) ? ' <span class="doux petit">(lendemain)</span>' : ''}${x.poste ? '<br><span class="doux petit">' + esc(x.poste) + '</span>' : ''}${x.note ? '<br><span class="doux petit">' + esc(x.note) + '</span>' : ''}</div>`).join('')}
+        ${conge.map(d => `<div class="creneau" style="border-left-color:var(--bon)">${esc(d.type)}${d.debut ? ' ' + hm(d.debut) + '–' + hm(d.fin) : ''}</div>`).join('')}
+        ${!c.length && !conge.length ? '<span class="doux petit">Repos ou non planifié</span>' : ''}</div>`;
+    }
+    html += `</div><p class="doux petit">Seul le planning publié par votre responsable apparaît ici.</p>`;
+    $('#vue').innerHTML = html; brancherNav();
+  }
+
+  // ---------- Pointages et heures calculées (pas un calcul de paie)
+  async function vueHeures() {
+    const fin = ajouterJours(semaine, 6);
+    // une journée de marge de chaque côté pour les services de nuit
+    const pts = await sb.lire('pointages', { select: 'id,sens,horodatage,jour,source', salarie_id: 'eq.' + moiId, and: `(jour.gte.${ajouterJours(semaine, -1)},jour.lte.${ajouterJours(fin, 1)})`, order: 'horodatage' });
+    const { jours, incomplets } = P.heuresParJour(pts);
+    let total = 0, lignes = '';
+    for (let i = 0; i < 7; i++) {
+      const j = ajouterJours(semaine, i), d = jours[j];
+      const listes = pts.filter(p => p.jour === j);
+      if (d) total += d.minutes;
+      lignes += `<tr><td>${esc(dateCourte(j))}</td><td>${listes.map(p => `${p.sens === 'entree' ? 'Entrée' : 'Sortie'} ${heure(p.horodatage)}${p.source === 'dirigeant' ? ' <span class="etiquette">corrigé</span>' : ''}`).join('<br>') || '<span class="doux">—</span>'}</td>
+        <td>${d ? duree(d.minutes) : '<span class="doux">—</span>'}</td></tr>`;
+    }
+    const inc = incomplets.filter(p => p.jour >= semaine && p.jour <= fin);
+    $('#vue').innerHTML = `<div class="carte">${navSemaine('Mes pointages')}
+      <div class="defile" style="margin-top:12px"><table class="tableau"><thead><tr><th>Jour</th><th>Pointages</th><th>Heures</th></tr></thead><tbody>${lignes}</tbody>
+      <tfoot><tr><th>Total de la semaine</th><th></th><th>${duree(total)}</th></tr></tfoot></table></div>
+      ${inc.length ? `<div class="message info" style="margin-top:12px">${inc.length} pointage(s) sans entrée ou sortie correspondante : ils ne sont pas comptés. Signalez-le à votre responsable si c'est un oubli.</div>` : ''}
+      <p class="doux petit">Heures calculées à partir de vos pointages (entrée puis sortie suivante, y compris après minuit). Ce n'est pas un calcul de paie : les heures supplémentaires, complémentaires et les majorations n'y figurent pas.</p></div>`;
+    brancherNav();
+  }
+
+  // ---------- Notifications (retards, absences) : réponse et justificatif
+  async function vueNotifs() {
+    const al = await sb.lire('alertes', { select: '*', salarie_id: 'eq.' + moiId, order: 'cree_le.desc', limit: '100' });
+    const docs = await sb.lire('documents', { select: 'id,alerte_id,nom,chemin,cree_le', salarie_id: 'eq.' + moiId });
+    if (!al.length) { $('#vue').innerHTML = '<div class="vide">Aucune notification.</div>'; return; }
+    $('#vue').innerHTML = al.map(a => {
+      const d = docs.filter(x => x.alerte_id === a.id);
+      const etat = a.annulee ? '<span class="etiquette">annulée</span>' : a.statut === 'repondu' ? '<span class="etiquette bon">réponse envoyée</span>' : a.type === 'retard' ? '<span class="etiquette alerte">retard</span>' : '<span class="etiquette mauvais">en attente de réponse</span>';
+      return `<div class="carte" data-a="${a.id}"><div class="ligne entre"><h2 style="margin:0">${esc(a.titre)}</h2>${etat}</div>
+        <p style="white-space:pre-wrap">${esc(a.corps)}</p>
+        ${a.annulee ? `<p class="doux petit">Annulée : ${esc(a.motif_annulation || 'sans objet')}. Aucune réponse n'est nécessaire.</p>` : ''}
+        ${a.reponse ? `<p><b>Votre réponse :</b> ${esc(a.reponse)}</p>` : ''}
+        ${d.length ? `<p class="petit">Justificatifs : ${d.map(x => `<a href="#" data-doc="${esc(x.chemin)}">${esc(x.nom)}</a>`).join(', ')}</p>` : ''}
+        ${!a.annulee && a.type === 'absence' ? `<form class="pile" data-rep="${a.id}">
+          <label class="champ">Votre réponse<textarea maxlength="2000" required>${esc(a.reponse || '')}</textarea></label>
+          <label class="champ">Justificatif (PDF ou photo, 10 Mo au plus)<input type="file" accept="application/pdf,image/*"></label>
+          <p class="doux petit">Pour un arrêt maladie, joignez uniquement le volet destiné à l'employeur, sans information médicale.</p>
+          <button class="bouton" type="submit">Envoyer</button></form>` : ''}</div>`;
+    }).join('');
+    // lues à l'affichage
+    for (const a of al.filter(x => !x.lu && !x.annulee)) sb.rpc('marquer_alerte_lue', { p_alerte: a.id }).catch(() => {});
+    setTimeout(compterNotifs, 800);
+    document.querySelectorAll('[data-doc]').forEach(l => l.onclick = async (e) => {
+      e.preventDefault(); try { window.open(await sb.lienTemporaire(l.dataset.doc, 300), '_blank', 'noopener'); } catch (er) { toast(messageErreur(er)); }
+    });
+    document.querySelectorAll('form[data-rep]').forEach(f => f.onsubmit = async (e) => {
+      e.preventDefault();
+      const b = f.querySelector('button'); b.disabled = true;
+      try {
+        const fichier = f.querySelector('input[type=file]').files[0];
+        if (fichier) await envoyerFichier(fichier, { alerte_id: f.dataset.rep });
+        await sb.rpc('repondre_alerte', { p_alerte: f.dataset.rep, p_reponse: f.querySelector('textarea').value });
+        toast('Réponse envoyée.'); vueNotifs();
+      } catch (er) { toast(messageErreur(er)); b.disabled = false; }
+    });
+  }
+
+  async function envoyerFichier(fichier, lien) {
+    if (fichier.size > 10 * 1024 * 1024) throw new Error('Fichier trop lourd (10 Mo au plus).');
+    const propre = fichier.name.normalize('NFD').replace(/[^\w.-]+/g, '_').slice(-80);
+    const chemin = `${etabId}/${moiId}/${crypto.randomUUID()}-${propre}`;
+    await sb.deposer(chemin, fichier);
+    await sb.ajouter('documents', { etab_id: etabId, salarie_id: moiId, chemin, nom: fichier.name.slice(0, 200), mime: fichier.type || 'application/octet-stream', taille: fichier.size, ...lien });
+  }
+
+  // ---------- Demandes de congé et d'absence
+  async function vueDemandes() {
+    const ds = await sb.lire('demandes', { select: '*', salarie_id: 'eq.' + moiId, order: 'cree_le.desc', limit: '100' });
+    const lib = { attente: '<span class="etiquette alerte">en attente</span>', acceptee: '<span class="etiquette bon">acceptée</span>', refusee: '<span class="etiquette mauvais">refusée</span>' };
+    $('#vue').innerHTML = `<form class="carte pile" id="nd"><h2>Nouvelle demande</h2>
+      <div class="grille2">
+        <label class="champ">Type<select id="t"><option>Congés payés</option><option>Absence / indisponibilité</option><option>Récupération</option><option>Autre</option></select></label>
+        <label class="champ">Du<input type="date" id="du" required></label>
+        <label class="champ">Au<input type="date" id="au" required></label>
+      </div>
+      <label class="ligne petit"><input type="checkbox" id="hor"> Seulement quelques heures</label>
+      <div class="grille2 cache" id="heures"><label class="champ">De<input type="time" id="hd"></label><label class="champ">À<input type="time" id="hf"></label></div>
+      <p class="doux petit cache" id="nuit">Une fin plus tôt que le début signifie le lendemain (par exemple 22:00 à 02:00).</p>
+      <label class="champ">Message (facultatif)<textarea id="m" maxlength="1000"></textarea></label>
+      <label class="champ">Justificatif (facultatif)<input type="file" id="pj" accept="application/pdf,image/*"></label>
+      <div id="msg" class="message cache" role="alert"></div>
+      <button class="bouton" type="submit">Envoyer la demande</button></form>
+      <div class="carte"><h2>Mes demandes</h2>${ds.length ? `<div class="defile"><table class="tableau"><thead><tr><th>Type</th><th>Période</th><th>État</th><th>Réponse</th></tr></thead><tbody>
+      ${ds.map(d => `<tr><td>${esc(d.type)}</td><td>${esc(dateCourte(d.du))}${d.au !== d.du ? ' → ' + esc(dateCourte(d.au)) : ''}${d.debut ? '<br>' + hm(d.debut) + '–' + hm(d.fin) : ''}</td><td>${lib[d.statut] || ''}</td><td>${esc(d.reponse || '')}</td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="vide">Aucune demande.</div>'}</div>`;
+    $('#hor').onchange = () => { $('#heures').classList.toggle('cache', !$('#hor').checked); $('#nuit').classList.toggle('cache', !$('#hor').checked); };
+    $('#du').onchange = () => { if (!$('#au').value || $('#au').value < $('#du').value) $('#au').value = $('#du').value; };
+    $('#nd').onsubmit = async (e) => {
+      e.preventDefault();
+      const m = $('#msg'); const err = t => { m.textContent = t; m.className = 'message erreur'; };
+      const du = $('#du').value, au = $('#au').value;
+      if (!du || !au) return err('Indiquez les dates.');
+      if (au < du) return err('La date de fin est avant la date de début.');
+      const hor = $('#hor').checked;
+      if (hor && (!$('#hd').value || !$('#hf').value)) return err('Indiquez les heures.');
+      const b = e.submitter || $('#nd button'); b.disabled = true;
+      try {
+        const [d] = await sb.ajouter('demandes', { etab_id: etabId, salarie_id: moiId, type: $('#t').value, du, au,
+          debut: hor ? $('#hd').value : null, fin: hor ? $('#hf').value : null, message: $('#m').value });
+        const f = $('#pj').files[0];
+        if (f) await envoyerFichier(f, { demande_id: d.id });
+        toast('Demande envoyée.'); vueDemandes();
+      } catch (er) { err(messageErreur(er)); b.disabled = false; }
+    };
+  }
+
+  // ---------- Informations personnelles et sécurité
+  async function vueInfos() {
+    $('#vue').innerHTML = `<div class="carte"><h2>Mes informations</h2>
+      <table class="tableau"><tbody>
+        <tr><th>Nom</th><td>${esc(fiche.prenom)} ${esc(fiche.nom)}</td></tr>
+        <tr><th>E-mail</th><td>${esc(fiche.email || '')}</td></tr>
+        <tr><th>Téléphone</th><td>${esc(fiche.telephone || '')}</td></tr>
+        <tr><th>Poste</th><td>${esc(fiche.poste || '')}</td></tr>
+        <tr><th>Contrat</th><td>${fiche.contrat_heures ? esc(fiche.contrat_heures) + ' h par semaine' : ''}</td></tr>
+      </tbody></table>
+      <p class="doux petit">Une information est inexacte ? Demandez à votre responsable de la corriger.</p></div>
+      <form class="carte pile" id="cm"><h2>Changer mon mot de passe</h2>
+        <label class="champ">Nouveau mot de passe<input type="password" id="p1" autocomplete="new-password"></label>
+        <label class="champ">Confirmer<input type="password" id="p2" autocomplete="new-password"></label>
+        <div id="msg" class="message cache" role="alert"></div>
+        <button class="bouton" type="submit">Enregistrer</button></form>
+      <div class="carte pile"><h2>Sécurité</h2><p class="doux petit" style="margin:0">Appareil perdu ou partagé ? Déconnectez votre compte de tous les appareils.</p>
+        <button class="bouton danger" id="partout">Me déconnecter de tous les appareils</button></div>`;
+    $('#cm').onsubmit = async (e) => {
+      e.preventDefault(); const m = $('#msg');
+      const er = P.controleMotDePasse($('#p1').value, $('#p2').value);
+      if (er) { m.textContent = er; m.className = 'message erreur'; return; }
+      try { await sb.changerMotDePasse($('#p1').value); m.textContent = 'Mot de passe modifié.'; m.className = 'message ok'; $('#p1').value = $('#p2').value = ''; }
+      catch (x) { m.textContent = messageErreur(x); m.className = 'message erreur'; }
+    };
+    $('#partout').onclick = async () => { await sb.deconnexion(true); location.replace('index.html'); };
+  }
+
+  async function afficher() {
+    try {
+      if (onglet === 'planning') await vuePlanning();
+      else if (onglet === 'heures') await vueHeures();
+      else if (onglet === 'notifs') await vueNotifs();
+      else if (onglet === 'demandes') await vueDemandes();
+      else await vueInfos();
+    } catch (e) {
+      if (e.statut === 401) { location.replace('index.html?raison=session'); return; }
+      $('#vue').innerHTML = `<div class="message erreur">${esc(messageErreur(e))}</div>`;
+    }
+  }
+  afficher(); compterNotifs();
+})();
+</script>
+</body>
+</html>

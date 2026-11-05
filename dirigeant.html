@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Espace dirigeant — Portail de pointage</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="tete">
+  <div class="enveloppe">
+    <h1 id="nomEtab">Espace dirigeant</h1>
+    <span class="qui" id="qui"></span>
+    <button class="bouton discret petit" id="deco">Se déconnecter</button>
+  </div>
+  <nav class="onglets enveloppe" role="tablist" id="onglets">
+    <button role="tab" data-o="jour" aria-selected="true">Pointages</button>
+    <button role="tab" data-o="equipe">Équipe et accès</button>
+    <button role="tab" data-o="journal">Journal</button>
+  </nav>
+</header>
+<main class="enveloppe"><div class="pile" id="vue"><p class="doux">Chargement…</p></div></main>
+
+<script src="assets/config.js"></script>
+<script src="assets/sb.js"></script>
+<script src="assets/commun.js"></script>
+<script>
+(async function () {
+  const { $, esc, heure, dateCourte, dateLongue, ajouterJours, aujourdhui, duree, messageErreur, toast } = P;
+  const ctx = await P.garde(['dirigeant']);
+  if (!ctx) return;
+  const etabId = ctx.membre.etab_id;
+  $('#nomEtab').textContent = ctx.etab.nom;
+  $('#qui').textContent = (ctx.user.user_metadata && ctx.user.user_metadata.nom) || ctx.user.email;
+  $('#deco').onclick = async () => { await sb.deconnexion(); location.replace('index.html'); };
+  let onglet = 'jour', jour = aujourdhui();
+  document.querySelectorAll('#onglets button').forEach(b => b.onclick = () => {
+    onglet = b.dataset.o; document.querySelectorAll('#onglets button').forEach(x => x.setAttribute('aria-selected', x === b)); afficher();
+  });
+  const retour = type => new URL('activer.html?type=' + type, location.href).href;
+  const demanderMotif = (q) => { const m = prompt(q); return m && m.trim().length >= 3 ? m.trim() : null; };
+
+  // ---------- Pointages du jour, corrections avec motif
+  async function vueJour() {
+    const sal = await sb.lire('salaries', { select: 'id,prenom,nom,actif', etab_id: 'eq.' + etabId, order: 'prenom' });
+    const pts = await sb.lire('pointages', { select: '*', etab_id: 'eq.' + etabId, and: `(jour.gte.${ajouterJours(jour, -1)},jour.lte.${ajouterJours(jour, 1)})`, order: 'horodatage' });
+    const lignes = sal.filter(s => s.actif || pts.some(p => p.salarie_id === s.id && p.jour === jour)).map(s => {
+      const miens = pts.filter(p => p.salarie_id === s.id);
+      const { jours, incomplets } = P.heuresParJour(miens);
+      const du = miens.filter(p => p.jour === jour);
+      return `<tr><td>${esc(s.prenom)} ${esc(s.nom)}</td>
+        <td>${du.map(p => `<span class="${p.supprime ? 'doux' : ''}" style="${p.supprime ? 'text-decoration:line-through' : ''}">${p.sens === 'entree' ? 'Entrée' : 'Sortie'} ${heure(p.horodatage)}</span>
+          ${p.supprime ? '' : `<button class="bouton discret petit" data-corr="${p.id}" data-h="${p.horodatage}">Corriger</button>`}`).join('<br>') || '<span class="doux">—</span>'}
+          ${incomplets.some(p => p.jour === jour) ? '<br><span class="etiquette alerte">pointage incomplet</span>' : ''}</td>
+        <td>${jours[jour] ? duree(jours[jour].minutes) : '—'}</td>
+        <td><button class="bouton second petit" data-ajout="${s.id}">Ajouter</button></td></tr>`;
+    }).join('');
+    $('#vue').innerHTML = `<div class="carte"><div class="ligne entre"><h2 style="margin:0">Pointages du ${esc(dateLongue(jour))}</h2>
+      <div class="ligne"><button class="bouton discret petit" data-j="-1">‹</button><input type="date" id="j" value="${jour}" style="width:auto"><button class="bouton discret petit" data-j="1">›</button></div></div>
+      <div class="defile" style="margin-top:12px"><table class="tableau"><thead><tr><th>Salarié</th><th>Pointages</th><th>Heures</th><th></th></tr></thead><tbody>${lignes || '<tr><td colspan="4" class="doux">Aucun salarié.</td></tr>'}</tbody></table></div>
+      <p class="doux petit">Heures calculées à partir des pointages ; ce n'est pas un calcul de paie. Toute correction exige un motif et reste inscrite au journal.</p></div>`;
+    document.querySelectorAll('[data-j]').forEach(b => b.onclick = () => { jour = ajouterJours(jour, Number(b.dataset.j)); afficher(); });
+    $('#j').onchange = e => { jour = e.target.value || aujourdhui(); afficher(); };
+    document.querySelectorAll('[data-corr]').forEach(b => b.onclick = async () => {
+      const choix = prompt('Nouvelle heure (HH:MM), ou SUPPRIMER pour annuler ce pointage :', heure(b.dataset.h));
+      if (!choix) return;
+      const motif = demanderMotif('Motif de la correction (obligatoire) :'); if (!motif) return toast('Motif obligatoire.');
+      try {
+        if (choix.trim().toUpperCase() === 'SUPPRIMER') await sb.rpc('corriger_pointage', { p_id: b.dataset.corr, p_horodatage: null, p_sens: null, p_supprime: true, p_motif: motif });
+        else {
+          if (!/^\d{1,2}:\d{2}$/.test(choix.trim())) return toast('Heure invalide.');
+          const d = new Date(b.dataset.h); const parisJour = P.jourCivil(d);
+          await sb.rpc('corriger_pointage', { p_id: b.dataset.corr, p_horodatage: horodatageParis(parisJour, choix.trim()), p_sens: null, p_supprime: null, p_motif: motif });
+        }
+        toast('Correction enregistrée.'); afficher();
+      } catch (e) { toast(messageErreur(e)); }
+    });
+    document.querySelectorAll('[data-ajout]').forEach(b => b.onclick = async () => {
+      const h = prompt('Heure du pointage à ajouter pour le ' + dateCourte(jour) + ' (HH:MM) :'); if (!h || !/^\d{1,2}:\d{2}$/.test(h.trim())) return;
+      const sens = confirm('OK = entrée, Annuler = sortie') ? 'entree' : 'sortie';
+      const motif = demanderMotif('Motif (obligatoire) :'); if (!motif) return toast('Motif obligatoire.');
+      try { await sb.rpc('ajouter_pointage', { p_salarie: b.dataset.ajout, p_horodatage: horodatageParis(jour, h.trim()), p_sens: sens, p_motif: motif }); toast('Pointage ajouté.'); afficher(); }
+      catch (e) { toast(messageErreur(e)); }
+    });
+  }
+  // Heure locale de Paris -> instant exact (gère l'heure d'été).
+  function horodatageParis(iso, hhmm) {
+    const [h, m] = hhmm.split(':').map(Number);
+    const supp = Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10), h, m);
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      .formatToParts(new Date(supp)).map(x => [x.type, x.value]));
+    const vu = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute);
+    return new Date(supp - (vu - supp)).toISOString();
+  }
+
+  // ---------- Équipe : fiches, comptes, codes de pointage, départs
+  async function vueEquipe() {
+    const sal = await sb.lire('salaries', { select: '*', etab_id: 'eq.' + etabId, order: 'actif.desc,prenom' });
+    const mem = await sb.lire('membres', { select: 'salarie_id,actif,role', etab_id: 'eq.' + etabId });
+    const compte = s => { const m = mem.find(x => x.salarie_id === s.id); return !m ? 'aucun compte' : m.actif ? 'compte actif ou invité' : 'compte désactivé'; };
+    $('#vue').innerHTML = `<form class="carte pile" id="ns"><h2>Ajouter un salarié</h2><div class="grille2">
+        <label class="champ">Prénom<input type="text" id="pr" required></label><label class="champ">Nom<input type="text" id="no"></label>
+        <label class="champ">E-mail<input type="email" id="em"></label><label class="champ">Téléphone<input type="tel" id="te"></label>
+        <label class="champ">Poste<input type="text" id="po"></label><label class="champ">Contrat (h/semaine)<input type="number" id="co" min="1" max="48" step="0.5"></label></div>
+        <button class="bouton" type="submit">Ajouter</button></form>
+      <div class="carte"><h2>Équipe</h2><div class="defile"><table class="tableau"><thead><tr><th>Salarié</th><th>Accès</th><th>Actions</th></tr></thead><tbody>
+      ${sal.map(s => `<tr><td><b>${esc(s.prenom)} ${esc(s.nom)}</b><br><span class="doux petit">${esc(s.poste || '')}${s.contrat_heures ? ' · ' + esc(s.contrat_heures) + ' h' : ''}<br>${esc(s.email || 'sans e-mail')}</span>
+        ${s.actif ? '' : '<br><span class="etiquette">parti le ' + esc(s.depart_le || '') + '</span>'}</td>
+        <td><span class="etiquette">${compte(s)}</span></td>
+        <td><div class="ligne">${s.actif ? `
+          <button class="bouton second petit" data-a="inviter" data-s="${s.id}">Inviter par e-mail</button>
+          <button class="bouton discret petit" data-a="lien_invitation" data-s="${s.id}">Lien d'activation</button>
+          <button class="bouton discret petit" data-a="lien_mot_de_passe" data-s="${s.id}">Lien mot de passe</button>
+          <button class="bouton discret petit" data-a="code" data-s="${s.id}">Code de pointage</button>
+          <button class="bouton danger petit" data-a="desactiver" data-s="${s.id}">Départ</button>` :
+          `<button class="bouton second petit" data-a="reactiver" data-s="${s.id}">Réactiver</button>`}</div></td></tr>`).join('')}
+      </tbody></table></div><div id="lien" class="message info cache" style="margin-top:12px;word-break:break-all"></div></div>`;
+    $('#ns').onsubmit = async e => {
+      e.preventDefault();
+      try { await sb.ajouter('salaries', { etab_id: etabId, prenom: $('#pr').value.trim(), nom: $('#no').value.trim(), email: $('#em').value.trim() || null,
+        telephone: $('#te').value.trim() || null, poste: $('#po').value.trim() || null, contrat_heures: $('#co').value ? Number($('#co').value) : null });
+        toast('Salarié ajouté.'); afficher(); } catch (x) { toast(messageErreur(x)); }
+    };
+    document.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => {
+      const a = b.dataset.a, id = b.dataset.s; b.disabled = true;
+      try {
+        if (a === 'code') {
+          const c = prompt('Nouveau code de pointage (4 à 6 chiffres, pas trop simple) :'); if (!c) return;
+          await sb.rpc('definir_code_pointage', { p_salarie: id, p_code: c.trim() }); toast('Code enregistré. Communiquez-le au salarié en main propre.');
+        } else if (a === 'desactiver' || a === 'reactiver') {
+          const motif = demanderMotif(a === 'desactiver' ? 'Motif du départ (obligatoire) :' : 'Motif de la réactivation (obligatoire) :'); if (!motif) return toast('Motif obligatoire.');
+          await sb.fonction('comptes', { action: a, salarie_id: id, motif }); toast(a === 'desactiver' ? 'Accès coupés, historique conservé.' : 'Accès rétablis.'); afficher();
+        } else {
+          const type = a === 'lien_mot_de_passe' ? 'recovery' : 'invite';
+          const r = await sb.fonction('comptes', { action: a, salarie_id: id, redirect_to: retour(type) });
+          if (a === 'inviter') { toast('Invitation envoyée par e-mail.'); afficher(); }
+          else { const l = $('#lien'); l.classList.remove('cache');
+            l.innerHTML = `<b>Lien à remettre au salarié</b> (une seule utilisation, durée limitée) :<br><code>${esc(r.lien)}</code><br><button class="bouton petit" id="copier">Copier</button>`;
+            $('#copier').onclick = () => navigator.clipboard.writeText(r.lien).then(() => toast('Lien copié.')); }
+        }
+      } catch (x) { toast(messageErreur(x)); }
+      finally { b.disabled = false; }
+    });
+  }
+
+  // ---------- Journal (lecture seule)
+  async function vueJournal() {
+    const j = await sb.lire('journal', { select: 'le,objet,action,auteur_nom,motif', etab_id: 'eq.' + etabId, order: 'le.desc', limit: '200' });
+    $('#vue').innerHTML = `<div class="carte"><h2>Journal des corrections et des accès</h2><p class="doux petit">Il ne peut être ni modifié ni effacé.</p>
+      <div class="defile"><table class="tableau"><thead><tr><th>Date</th><th>Objet</th><th>Action</th><th>Auteur</th><th>Motif</th></tr></thead><tbody>
+      ${j.map(x => `<tr><td>${esc(new Date(x.le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }))}</td><td>${esc(x.objet)}</td><td>${esc(x.action)}</td><td>${esc(x.auteur_nom || '')}</td><td>${esc(x.motif || '')}</td></tr>`).join('')}
+      </tbody></table></div></div>`;
+  }
+
+  async function afficher() {
+    try { if (onglet === 'jour') await vueJour(); else if (onglet === 'equipe') await vueEquipe(); else await vueJournal(); }
+    catch (e) { if (e.statut === 401) return location.replace('index.html?raison=session'); $('#vue').innerHTML = `<div class="message erreur">${esc(messageErreur(e))}</div>`; }
+  }
+  afficher();
+})();
+</script>
+</body>
+</html>
