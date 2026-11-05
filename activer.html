@@ -50,7 +50,7 @@
     await sb.moi();
     $('#formulaire').classList.remove('cache');
   } catch (e) {
-    msg(messageErreur(e) + ' Votre responsable peut vous remettre un nouveau lien.');
+    msg(e && e.code === 'otp_expired' ? 'Ce lien a expiré ou a déjà servi. Votre responsable peut vous en remettre un nouveau.' : messageErreur(e));
     return;
   }
 

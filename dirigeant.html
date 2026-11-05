@@ -37,7 +37,7 @@
   document.querySelectorAll('#onglets button').forEach(b => b.onclick = () => {
     onglet = b.dataset.o; document.querySelectorAll('#onglets button').forEach(x => x.setAttribute('aria-selected', x === b)); afficher();
   });
-  const retour = type => new URL('activer.html?type=' + type, location.href).href;
+  const retour = () => new URL('activer.html', location.href).href;
   const demanderMotif = (q) => { const m = prompt(q); return m && m.trim().length >= 3 ? m.trim() : null; };
 
   // ---------- Pointages du jour, corrections avec motif
