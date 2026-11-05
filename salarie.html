@@ -102,7 +102,7 @@
       P_ += sm.planned; W += sm.worked; if (sm.incomplete && !(enCours && j === aujourdhui())) incomplets++;
       if (!sm.pairs.length && !sm.sh.length) continue;
       lignes += `<tr><td class="nw">${esc(dateCourte(j))}</td><td class="nw">${sm.sh.length ? sm.sh.map(x => `${x.a}–${x.b}${x.p ? ` <span class="doux petit">(pause ${x.p} min)</span>` : ''}`).join('<br>') : '—'}</td>
-        <td class="num">${sm.pairs.map(x => `${x.in ? R.hm(x.in.ts) : '??'} → ${x.out ? (x.out.date !== j ? 'lendemain ' : '') + R.hm(x.out.ts) : (x.in && enCours ? 'en cours' : '??')}${(x.in && x.in.manual) || (x.out && x.out.manual) ? ' <span class="etiquette">corrigé</span>' : ''}`).join('<br>') || '<span class="doux">Aucun pointage</span>'}</td>
+        <td class="num">${sm.pairs.map(x => `${x.in ? R.hm(x.in.ts) : '??'} → ${x.out ? (x.out.date !== j ? 'lendemain ' : '') + R.hm(x.out.ts) : (x.in && enCours && x.in.id === pts[pts.length - 1].id ? 'en cours' : '??')}${(x.in && x.in.manual) || (x.out && x.out.manual) ? ' <span class="etiquette">corrigé</span>' : ''}`).join('<br>') || '<span class="doux">Aucun pointage</span>'}</td>
         <td class="num"><b>${R.fmtH(sm.worked)}</b></td></tr>`;
     }
     const t = aujourdhui();
