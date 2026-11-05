@@ -188,7 +188,7 @@
       const v = await formulaire('Proposition de planning par l\u2019IA', [{ id: 'consignes', label: 'Vos contraintes et consignes pour la semaine', type: 'textarea', requis: true }], 'Demander une proposition',
         'Envoyé à Claude : pour chaque salarié un code (S1, S2…), son contrat, son poste et ses disponibilités, les congés validés de la semaine et vos consignes. Les prénoms et noms cités dans vos consignes sont remplacés par ces codes avant l\u2019envoi. Jamais de coordonnées ni de pointages. Rien n\u2019est appliqué sans votre accord.');
       if (!v) return;
-      const zone = $('#propIA'); zone.innerHTML = '<div class="carte"><p class="doux">L\u2019IA prépare une proposition\u2026</p></div>';
+      const zone = $('#propIA'); zone.innerHTML = '<div class="carte"><p class="doux">L\u2019IA prépare une proposition\u2026 cela peut prendre une à deux minutes. Vous pouvez continuer à travailler dans un autre onglet.</p></div>';
       let p;
       try { p = await sb.fonction('planning-ia', { etab_id: etabId, lundi: semaine, consignes: v.consignes }); }
       catch (e) { zone.innerHTML = `<div class="message erreur">${esc(e.code === 'ia_non_configuree' ? 'L\u2019assistant n\u2019est pas encore activé (clé de l\u2019API Claude non installée). Le planning reste modifiable à la main.' : messageErreur(e) + ' Le planning reste modifiable à la main.')}</div>`; return; }
