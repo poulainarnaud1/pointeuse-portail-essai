@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pointeuse — Portail de pointage</title>
-<link rel="stylesheet" href="assets/style.css?v=5">
+<link rel="stylesheet" href="assets/style.css?v=7">
 <style>
   body { background: #15120f; color: #f4efe8; }
   .borne { min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
@@ -35,22 +35,23 @@
 <div class="borne">
   <header><h1 id="nomEtab">Pointeuse</h1><span id="reseau" class="petit"></span></header>
   <div class="corps">
-    <div class="horloge"><div class="h" id="h">--:--:--</div><div class="d" id="d"></div></div>
+    <div class="horloge"><div class="h" id="h">--:--:--</div><div class="d" id="d"></div><div class="petit" id="presents" style="color:#cfc6ba;margin-top:10px"></div></div>
     <div class="clavier" id="clavier">
       <div id="invite" style="text-transform:uppercase;letter-spacing:.08em;color:#cfc6ba">Tapez votre code</div>
       <div class="points" id="points"></div>
       <div class="touches" id="touches"></div>
+      <div id="bonjour" class="cache" style="text-align:center"></div>
       <div class="choix cache" id="choix">
         <button data-s="entree">ENTRÉE</button><button data-s="sortie">SORTIE</button>
       </div>
       <div class="etat" id="etat" role="status" aria-live="polite"></div>
     </div>
   </div>
-  <div class="pied"><span id="ecart">Heure du serveur</span><button id="quitter">Déconnecter la tablette (maintenir 3 s)</button></div>
+  <div class="pied"><span id="ecart">Heure du serveur</span><button id="quitter">Quitter la pointeuse</button></div>
 </div>
-<script src="assets/config.js?v=5"></script>
-<script src="assets/sb.js?v=5"></script>
-<script src="assets/commun.js?v=5"></script>
+<script src="assets/config.js?v=7"></script>
+<script src="assets/sb.js?v=7"></script>
+<script src="assets/commun.js?v=7"></script>
 <script>
 (async function () {
   const { $, fmt, heure, messageErreur } = P;
@@ -89,13 +90,36 @@
   dessinerPoints();
 
   function etat(t, c) { const e = $('#etat'); e.textContent = t; e.className = 'etat ' + (c || ''); }
-  function demanderSens() { $('#touches').classList.add('cache'); $('#choix').classList.remove('cache'); $('#invite').textContent = 'Entrée ou sortie ?'; }
-  function remettre() { code = ''; dessinerPoints(); $('#touches').classList.remove('cache'); $('#choix').classList.add('cache'); $('#invite').textContent = 'Tapez votre code'; }
+  // Présents (prénoms des salariés en service), comme sur la pointeuse de la v16.
+  async function presents() { try { const l = await sb.rpc('presents_tablette'); $('#presents').textContent = l.length ? 'En service : ' + l.join(', ') : 'Personne en service pour le moment'; } catch (e) { /* */ } }
+  presents(); setInterval(presents, 60000);
+  let ident = null, codeSaisi = '', minuteurAccueil, confirmer = null;
+  // 1. Le code est vérifié par le serveur : prénom, service prévu, sens suggéré (rien n'est encore enregistré).
+  async function demanderSens() {
+    const c = code; code = ''; dessinerPoints();
+    etat('Vérification…', 'att');
+    try { ident = await sb.rpc('identifier_code', { p_code: c }); } catch (e) { etat('Réseau indisponible : réessayez. ' + messageErreur(e), 'err'); return; }
+    if (!ident.ok) { etat(ident.erreur === 'bloque' ? 'Trop de codes faux : réessayez dans ' + ident.attente_s + ' s.' : 'Code incorrect.' + (ident.attente_s ? ' Tablette bloquée ' + ident.attente_s + ' s.' : ''), 'err'); return; }
+    codeSaisi = c; etat(''); confirmer = null;
+    $('#touches').classList.add('cache'); $('#choix').classList.remove('cache'); $('#bonjour').classList.remove('cache');
+    $('#invite').textContent = 'Entrée ou sortie ?';
+    $('#bonjour').innerHTML = `<div style="font-size:1.4rem;font-weight:700">Bonjour ${P.esc(ident.prenom)}</div><div class="petit" style="color:#cfc6ba">${ident.conge ? P.esc(ident.conge) + ' aujourd’hui' : ident.prevu ? 'Prévu aujourd’hui : ' + P.esc(ident.prevu) : 'Pas de créneau publié aujourd’hui'}${ident.en_service_depuis ? ' · entré à ' + heure(ident.en_service_depuis) : ''}</div>`;
+    document.querySelectorAll('#choix button').forEach(b => b.classList.toggle('sug', b.dataset.s === ident.suggestion));
+    clearTimeout(minuteurAccueil); minuteurAccueil = setTimeout(remettre, 25000);
+  }
+  function remettre() { code = ''; codeSaisi = ''; ident = null; dessinerPoints(); $('#touches').classList.remove('cache'); $('#choix').classList.add('cache'); $('#bonjour').classList.add('cache'); $('#invite').textContent = 'Tapez votre code'; }
+  $('#choix').innerHTML = '<button data-s="entree">ENTRÉE<br><small style="font-weight:400;font-size:.9rem">Je commence</small></button><button data-s="sortie">SORTIE<br><small style="font-weight:400;font-size:.9rem">Je termine</small></button><button data-s="annuler" style="grid-column:1/-1;padding:10px;font-size:1rem;background:none">Annuler</button>';
 
-  // Envoi : même identifiant pour chaque nouvel essai, donc jamais de doublon même si une réponse s'est perdue.
+  // 2. Envoi : même identifiant pour chaque nouvel essai, donc jamais de doublon même si une réponse s'est perdue.
   $('#choix').onclick = async e => {
-    const sens = e.target.dataset.s; if (!sens) return;
-    const id = crypto.randomUUID(), c = code; remettre();
+    const bt = e.target.closest('button'); if (!bt) return;
+    const sens = bt.dataset.s; if (sens === 'annuler') { remettre(); return; }
+    // même sens que le dernier pointage, il y a moins de 3 minutes : on demande de confirmer (v16)
+    if (ident && ident.dernier && ident.dernier.sens === sens && Date.now() + decalage - Date.parse(ident.dernier.horodatage) < 180000 && confirmer !== sens) {
+      confirmer = sens; etat(`${sens === 'entree' ? 'Entrée' : 'Sortie'} déjà pointée à ${heure(ident.dernier.horodatage)}. Touchez de nouveau pour confirmer.`, 'att'); return;
+    }
+    clearTimeout(minuteurAccueil);
+    const id = crypto.randomUUID(), c = codeSaisi; remettre();
     etat('Enregistrement…', 'att');
     const fin = Date.now() + 120000; let r = null, derniere = null;
     while (Date.now() < fin) {
@@ -110,14 +134,24 @@
     }
     const h = heure(r.horodatage);
     if (r.doublon) etat(`${r.prenom || ''} : déjà pointé à ${h} (moins de 2 minutes). Rien de plus n'est enregistré.`, 'att');
-    else etat(`${r.prenom || ''} : ${r.sens === 'entree' ? 'entrée' : 'sortie'} enregistrée à ${h}.`, 'ok');
+    else etat(r.sens === 'entree' ? `Entrée enregistrée à ${h}. Bon service, ${r.prenom || ''} !` : `Sortie enregistrée à ${h}. Merci et bonne fin de journée, ${r.prenom || ''}.`, 'ok');
+    presents();
     setTimeout(() => etat(''), 8000);
   };
 
-  // Sortie du mode borne : appui maintenu 3 secondes.
+  // Quitter le mode pointeuse : code de la pointeuse (vérifié par le serveur). Sans code défini : appui maintenu 3 secondes.
   let minuteur;
   const q = $('#quitter');
-  q.onpointerdown = () => { minuteur = setTimeout(async () => { await sb.deconnexion(); location.replace('index.html'); }, 3000); };
+  q.onclick = async () => {
+    const v = await P.formulaire('Quitter la pointeuse', [{ id: 'c', label: 'Code de la pointeuse', type: 'password', attr: 'inputmode="numeric" autocomplete="off"' }], 'Quitter', 'Si aucun code n’a été défini par le dirigeant, laissez vide.');
+    if (!v) return;
+    try { const r = await sb.rpc('verifier_code_sortie', { p_code: v.c || '' });
+      if (r.ok && r.sans_code) { etat('Aucun code défini : maintenez le bouton « Quitter » 3 secondes.', 'att'); return; }
+      if (!r.ok) { etat(r.erreur === 'bloque' ? 'Trop d’essais : patientez ' + r.attente_s + ' s.' : 'Code de la pointeuse incorrect.', 'err'); return; }
+      await sb.deconnexion(); location.replace('index.html');
+    } catch (e) { etat(messageErreur(e), 'err'); }
+  };
+  q.onpointerdown = () => { minuteur = setTimeout(async () => { try { const r = await sb.rpc('verifier_code_sortie', { p_code: '' }); if (r.ok && r.sans_code) { await sb.deconnexion(); location.replace('index.html'); } } catch (e) { /* */ } }, 3000); };
   q.onpointerup = q.onpointerleave = () => clearTimeout(minuteur);
 })();
 </script>

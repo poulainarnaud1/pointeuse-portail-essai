@@ -49,6 +49,7 @@
     const r = (etab && etab.reglages) || {};
     const couleur = /^#[0-9a-f]{6}$/i.test(r.couleur || '') ? r.couleur : C.couleurParDefaut;
     document.documentElement.style.setProperty('--accent', couleur);
+    if (/^#[0-9a-f]{6}$/i.test(r.couleur_titres || '')) document.documentElement.style.setProperty('--titre', r.couleur_titres);
     if (etab && etab.nom) document.title = etab.nom + ' — ' + document.title.split(' — ').pop();
   }
 
@@ -152,6 +153,17 @@
     });
   }
 
-  window.P = { $, esc, fmt, jourCivil, heure, dateLongue, dateCourte, ajouterJours, lundi, aujourdhui, hm, duree,
+  // Fenêtre libre dans la page (contenu HTML fourni) : renvoie l'élément et une fonction de fermeture.
+  function fenetre(html, large) {
+    const fond = document.createElement('div'); fond.className = 'fond-modal';
+    fond.innerHTML = `<div class="carte modal pile${large ? ' large' : ''}" role="dialog" aria-modal="true">${html}</div>`;
+    document.body.appendChild(fond);
+    const fermer = () => fond.remove();
+    fond.addEventListener('keydown', e => { if (e.key === 'Escape') fermer(); });
+    fond.querySelectorAll('[data-fermer]').forEach(b => b.onclick = fermer);
+    return { el: fond.firstElementChild, fermer };
+  }
+
+  window.P = { fenetre, $, esc, fmt, jourCivil, heure, dateLongue, dateCourte, ajouterJours, lundi, aujourdhui, hm, duree,
     messageErreur, toast, bandeauEssai, appliquerIdentite, controleMotDePasse, garde, heuresParJour, formulaire };
 })();

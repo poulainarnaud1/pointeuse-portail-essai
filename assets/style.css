@@ -98,3 +98,22 @@ textarea { min-height: 80px; resize: vertical; }
 .grille-planning .case:hover { background: color-mix(in srgb, var(--accent) 6%, #fff); }
 .grille-planning .creneau { cursor: pointer; }
 .creneau.conflit { border-left-color: var(--mauvais); background: #fdecea; }
+
+/* v16 : écrans repris (relevé, aujourd'hui, messages) */
+.modal.large { max-width: 860px; }
+h1, h2, h3 { color: var(--titre, inherit); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.kpi { background: var(--surface); border: 1px solid var(--ligne); border-radius: var(--rayon); padding: 12px; display: grid; gap: 2px; text-align: left; }
+.kpi .v { font-size: 1.6rem; font-weight: 700; }
+.kpi .l { font-size: .85rem; color: var(--doux); }
+.kpi.alerte .v { color: var(--mauvais); }
+button.kpi { cursor: pointer; font: inherit; color: inherit; }
+.nw { white-space: nowrap; }
+.num { font-variant-numeric: tabular-nums; }
+.ligne-ia { padding: 6px 10px; border-radius: 6px; font-size: .9rem; border-left: 3px solid var(--ligne); background: #f7f5f2; }
+.ligne-ia.bad { border-left-color: var(--mauvais); background: #fdecea; }
+.ligne-ia.warn { border-left-color: var(--alerte); background: #fff6e5; }
+.ligne-ia.info { border-left-color: #2d4a73; background: #eef2f8; }
+.jours-coches { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: .9rem; }
+.puce { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+.creneau small { display: block; color: var(--doux); font-size: .78rem; }

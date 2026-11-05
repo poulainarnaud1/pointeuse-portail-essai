@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mon espace — Portail de pointage</title>
-<link rel="stylesheet" href="assets/style.css?v=5">
+<link rel="stylesheet" href="assets/style.css?v=7">
 </head>
 <body>
 <header class="tete">
@@ -23,9 +23,10 @@
 </header>
 <main class="enveloppe"><div class="pile" id="vue"><p class="doux">Chargement…</p></div></main>
 
-<script src="assets/config.js?v=5"></script>
-<script src="assets/sb.js?v=5"></script>
-<script src="assets/commun.js?v=5"></script>
+<script src="assets/config.js?v=7"></script>
+<script src="assets/sb.js?v=7"></script>
+<script src="assets/commun.js?v=7"></script>
+<script src="assets/releve.js?v=7"></script>
 <script>
 (async function () {
   const { $, esc, heure, dateLongue, dateCourte, ajouterJours, lundi, aujourdhui, hm, duree, messageErreur, toast } = P;
@@ -47,7 +48,10 @@
   async function compterNotifs() {
     try {
       const n = await sb.lire('alertes', { select: 'id', salarie_id: 'eq.' + moiId, lu: 'eq.false', annulee: 'eq.false' });
-      const p = $('#nbNotifs'); p.textContent = n.length; p.classList.toggle('cache', !n.length);
+      const ms = await sb.lire('messages', { select: 'id', etab_id: 'eq.' + etabId });
+      const lus = await sb.lire('messages_lus', { select: 'message_id', salarie_id: 'eq.' + moiId });
+      const total = n.length + ms.filter(m => !lus.some(l => l.message_id === m.id)).length;
+      const p = $('#nbNotifs'); p.textContent = total; p.classList.toggle('cache', !total);
     } catch (e) { /* sans gravité */ }
   }
 
@@ -67,15 +71,16 @@
   // ---------- Planning publié (les brouillons ne sont jamais transmis par la base)
   async function vuePlanning() {
     const fin = ajouterJours(semaine, 6);
-    const cr = await sb.lire('creneaux', { select: 'jour,debut,fin,poste,note', salarie_id: 'eq.' + moiId, and: `(jour.gte.${semaine},jour.lte.${fin})`, order: 'jour,debut' });
+    const cr = await sb.lire('creneaux', { select: 'id,salarie_id,jour,debut,fin,poste,note,pause_min', salarie_id: 'eq.' + moiId, and: `(jour.gte.${semaine},jour.lte.${fin})`, order: 'jour,debut' });
     const [demandes] = [await sb.lire('demandes', { select: 'type,du,au,debut,fin,statut', salarie_id: 'eq.' + moiId, statut: 'eq.acceptee', du: 'lte.' + fin, au: 'gte.' + semaine })];
-    let html = `<div class="carte">${navSemaine('Mon planning')}</div><div class="jours">`;
+    const prevues = cr.reduce((m, x) => m + R.shiftMin(R.creneau(x)), 0);
+    let html = `<div class="carte">${navSemaine('Mon planning')}${cr.length ? `<p class="petit" style="margin:8px 0 0"><span class="etiquette bon">${R.fmtH(prevues)} prévues</span> (pauses prévues déduites)</p>` : ''}</div><div class="jours">`;
     for (let i = 0; i < 7; i++) {
       const j = ajouterJours(semaine, i);
       const c = cr.filter(x => x.jour === j);
       const conge = demandes.filter(d => d.du <= j && d.au >= j);
       html += `<div class="jour ${j === aujourdhui() ? 'aujourdhui' : ''}"><b>${esc(dateCourte(j))}</b>
-        ${c.map(x => `<div class="creneau">${hm(x.debut)}–${hm(x.fin)}${hm(x.fin) <= hm(x.debut) ? ' <span class="doux petit">(lendemain)</span>' : ''}${x.poste ? '<br><span class="doux petit">' + esc(x.poste) + '</span>' : ''}${x.note ? '<br><span class="doux petit">' + esc(x.note) + '</span>' : ''}</div>`).join('')}
+        ${c.map(x => `<div class="creneau">${hm(x.debut)}–${hm(x.fin)}${hm(x.fin) <= hm(x.debut) ? ' <span class="doux petit">(lendemain)</span>' : ''}${x.pause_min ? '<br><span class="doux petit">pause ' + x.pause_min + ' min</span>' : ''}${x.poste ? '<br><span class="doux petit">' + esc(x.poste) + '</span>' : ''}${x.note ? '<br><span class="doux petit">' + esc(x.note) + '</span>' : ''}</div>`).join('')}
         ${conge.map(d => `<div class="creneau" style="border-left-color:var(--bon)">${esc(d.type)}${d.debut ? ' ' + hm(d.debut) + '–' + hm(d.fin) : ''}</div>`).join('')}
         ${!c.length && !conge.length ? '<span class="doux petit">Repos ou non planifié</span>' : ''}</div>`;
     }
@@ -83,41 +88,54 @@
     $('#vue').innerHTML = html; brancherNav();
   }
 
-  // ---------- Pointages et heures calculées (pas un calcul de paie)
+  // ---------- Pointages et heures calculées automatiquement (même calcul que la v16 ; pas un calcul de paie)
   async function vueHeures() {
     const fin = ajouterJours(semaine, 6);
     // une journée de marge de chaque côté pour les services de nuit
-    const pts = await sb.lire('pointages', { select: 'id,sens,horodatage,jour,source', salarie_id: 'eq.' + moiId, and: `(jour.gte.${ajouterJours(semaine, -1)},jour.lte.${ajouterJours(fin, 1)})`, order: 'horodatage' });
-    const { jours, incomplets } = P.heuresParJour(pts);
-    let total = 0, lignes = '';
+    const pts = await sb.lire('pointages', { select: 'id,salarie_id,sens,horodatage,jour,source,supprime', salarie_id: 'eq.' + moiId, and: `(jour.gte.${ajouterJours(semaine, -1)},jour.lte.${ajouterJours(fin, 1)})`, order: 'horodatage' });
+    const cr = await sb.lire('creneaux', { select: 'id,salarie_id,jour,debut,fin,pause_min,poste', salarie_id: 'eq.' + moiId, and: `(jour.gte.${semaine},jour.lte.${fin})` });
+    const ctxR = R.contexte(pts.map(p => R.pointage(p)), cr.map(R.creneau), []);
+    const enCours = (() => { const l = pts.slice(-1)[0]; return l && l.sens === 'entree' && Date.now() - Date.parse(l.horodatage) < 16 * 3600e3; })();
+    let P_ = 0, W = 0, lignes = '', incomplets = 0;
     for (let i = 0; i < 7; i++) {
-      const j = ajouterJours(semaine, i), d = jours[j];
-      const listes = pts.filter(p => p.jour === j);
-      if (d) total += d.minutes;
-      lignes += `<tr><td>${esc(dateCourte(j))}</td><td>${listes.map(p => `${p.sens === 'entree' ? 'Entrée' : 'Sortie'} ${heure(p.horodatage)}${p.source === 'dirigeant' ? ' <span class="etiquette">corrigé</span>' : ''}`).join('<br>') || '<span class="doux">—</span>'}</td>
-        <td>${d ? duree(d.minutes) : '<span class="doux">—</span>'}</td></tr>`;
+      const j = ajouterJours(semaine, i), sm = R.daySummary(ctxR, moiId, j);
+      P_ += sm.planned; W += sm.worked; if (sm.incomplete && !(enCours && j === aujourdhui())) incomplets++;
+      if (!sm.pairs.length && !sm.sh.length) continue;
+      lignes += `<tr><td class="nw">${esc(dateCourte(j))}</td><td class="nw">${sm.sh.length ? sm.sh.map(x => `${x.a}–${x.b}${x.p ? ` <span class="doux petit">(pause ${x.p} min)</span>` : ''}`).join('<br>') : '—'}</td>
+        <td class="num">${sm.pairs.map(x => `${x.in ? R.hm(x.in.ts) : '??'} → ${x.out ? (x.out.date !== j ? 'lendemain ' : '') + R.hm(x.out.ts) : (x.in && enCours ? 'en cours' : '??')}${(x.in && x.in.manual) || (x.out && x.out.manual) ? ' <span class="etiquette">corrigé</span>' : ''}`).join('<br>') || '<span class="doux">Aucun pointage</span>'}</td>
+        <td class="num"><b>${R.fmtH(sm.worked)}</b></td></tr>`;
     }
-    const inc = incomplets.filter(p => p.jour >= semaine && p.jour <= fin);
-    $('#vue').innerHTML = `<div class="carte">${navSemaine('Mes pointages')}
-      <div class="defile" style="margin-top:12px"><table class="tableau"><thead><tr><th>Jour</th><th>Pointages</th><th>Heures</th></tr></thead><tbody>${lignes}</tbody>
-      <tfoot><tr><th>Total de la semaine</th><th></th><th>${duree(total)}</th></tr></tfoot></table></div>
-      ${inc.length ? `<div class="message info" style="margin-top:12px">${inc.length} pointage(s) sans entrée ou sortie correspondante : ils ne sont pas comptés. Signalez-le à votre responsable si c'est un oubli.</div>` : ''}
-      <p class="doux petit">Heures calculées à partir de vos pointages (entrée puis sortie suivante, y compris après minuit). Ce n'est pas un calcul de paie : les heures supplémentaires, complémentaires et les majorations n'y figurent pas.</p></div>`;
+    const t = aujourdhui();
+    $('#vue').innerHTML = `<div class="carte pile">${navSemaine('Mes heures')}
+      <div class="ligne"><button class="bouton discret petit" data-sem2="0">Cette semaine</button><button class="bouton discret petit" data-sem2="-7">Semaine dernière</button></div>
+      <div class="kpis"><div class="kpi"><span class="v">${R.fmtH(W)}</span><span class="l">heures pointées</span></div><div class="kpi"><span class="v">${R.fmtH(P_)}</span><span class="l">heures prévues</span></div>
+        ${fiche && fiche.contrat_heures ? `<div class="kpi"><span class="v">${+fiche.contrat_heures}h</span><span class="l">contrat hebdomadaire</span></div>` : ''}<div class="kpi"><span class="v">${W - P_ > 0 ? '+' : ''}${R.fmtH(W - P_)}</span><span class="l">écart pointé − prévu</span></div></div>
+      ${lignes ? `<div class="defile"><table class="tableau"><thead><tr><th>Jour</th><th>Prévu</th><th>Pointé</th><th>Total</th></tr></thead><tbody>${lignes}</tbody></table></div>` : '<div class="vide">Aucun pointage cette semaine.</div>'}
+      ${incomplets ? `<div class="message info">${incomplets} journée(s) avec un pointage incomplet : la partie sans entrée ou sans sortie n'est pas comptée. Signalez-le à votre responsable (demande « Autre demande ») : il corrigera.</div>` : ''}
+      <p class="doux petit" style="margin:0">Heures calculées automatiquement à partir de vos pointages (entrée puis sortie suivante, y compris après minuit ; pauses pointées déduites). Ce n'est pas un calcul de paie : les heures supplémentaires, complémentaires et les majorations n'y figurent pas. Seul le planning publié est pris en compte pour les heures prévues.</p></div>`;
     brancherNav();
+    document.querySelectorAll('[data-sem2]').forEach(b => b.onclick = () => { semaine = ajouterJours(lundi(t), Number(b.dataset.sem2)); afficher(); });
   }
 
   // ---------- Notifications (retards, absences) : réponse et justificatif
   async function vueNotifs() {
     const al = await sb.lire('alertes', { select: '*', salarie_id: 'eq.' + moiId, order: 'cree_le.desc', limit: '100' });
     const docs = await sb.lire('documents', { select: 'id,alerte_id,nom,chemin,cree_le', salarie_id: 'eq.' + moiId });
-    if (!al.length) { $('#vue').innerHTML = '<div class="vide">Aucune notification.</div>'; return; }
-    $('#vue').innerHTML = al.map(a => {
+    const msgs = await sb.lire('messages', { select: '*', etab_id: 'eq.' + etabId, order: 'cree_le.desc', limit: '100' });
+    const lus = await sb.lire('messages_lus', { select: 'message_id', salarie_id: 'eq.' + moiId });
+    if (!al.length && !msgs.length) { $('#vue').innerHTML = '<div class="vide">Aucune notification pour le moment. Les messages de la direction et les réponses à vos demandes apparaîtront ici.</div>'; return; }
+    const elems = [...al.map(a => ({ t: 'a', le: a.cree_le, a })), ...msgs.map(m => ({ t: 'm', le: m.cree_le, m }))].sort((x, y) => y.le.localeCompare(x.le));
+    $('#vue').innerHTML = elems.map(({ t, a, m }) => {
+      if (t === 'm') { const nonLu = !lus.some(l => l.message_id === m.id);
+        return `<div class="carte" style="${nonLu ? 'border-color:var(--accent)' : ''}"><div class="ligne entre"><div class="ligne"><span class="etiquette">${esc(m.categorie)}</span>${nonLu ? '<span class="etiquette alerte">Nouveau</span>' : ''}</div><span class="doux petit">${esc(new Date(m.cree_le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }))}</span></div>
+          <h2 style="margin:6px 0">${esc(m.titre)}</h2>${m.du ? `<p class="petit num" style="margin:0">${m.au && m.au !== m.du ? `Du ${esc(dateCourte(m.du))} au ${esc(dateCourte(m.au))}` : `Le ${esc(dateCourte(m.du))}`}</p>` : ''}<p style="white-space:pre-wrap">${esc(m.corps)}</p><span class="doux petit">De la direction</span></div>`; }
       const d = docs.filter(x => x.alerte_id === a.id);
-      const etat = a.annulee ? '<span class="etiquette">annulée</span>' : a.statut === 'repondu' ? '<span class="etiquette bon">réponse envoyée</span>' : a.type === 'retard' ? '<span class="etiquette alerte">retard</span>' : '<span class="etiquette mauvais">en attente de réponse</span>';
+      const etat = a.annulee ? '<span class="etiquette">annulée</span>' : a.statut === 'justifiee' ? '<span class="etiquette bon">absence justifiée</span>' : a.statut === 'injustifiee' ? '<span class="etiquette mauvais">absence non justifiée</span>' : a.statut === 'repondu' ? '<span class="etiquette bon">réponse envoyée</span>' : a.type === 'retard' ? '<span class="etiquette alerte">retard</span>' : '<span class="etiquette mauvais">en attente de réponse</span>';
       return `<div class="carte" data-a="${a.id}"><div class="ligne entre"><h2 style="margin:0">${esc(a.titre)}</h2>${etat}</div>
         <p style="white-space:pre-wrap">${esc(a.corps)}</p>
         ${a.annulee ? `<p class="doux petit">Annulée : ${esc(a.motif_annulation || 'sans objet')}. Aucune réponse n'est nécessaire.</p>` : ''}
         ${a.reponse ? `<p><b>Votre réponse :</b> ${esc(a.reponse)}</p>` : ''}
+        ${a.decision ? `<p><b>Direction :</b> ${esc(a.decision)}</p>` : ''}
         ${d.length ? `<p class="petit">Justificatifs : ${d.map(x => `<a href="#" data-doc="${esc(x.chemin)}">${esc(x.nom)}</a>`).join(', ')}</p>` : ''}
         ${!a.annulee && a.type === 'absence' ? `<form class="pile" data-rep="${a.id}">
           <label class="champ">Votre réponse<textarea maxlength="2000" required>${esc(a.reponse || '')}</textarea></label>
@@ -127,6 +145,7 @@
     }).join('');
     // lues à l'affichage
     for (const a of al.filter(x => !x.lu && !x.annulee)) sb.rpc('marquer_alerte_lue', { p_alerte: a.id }).catch(() => {});
+    for (const m of msgs.filter(x => !lus.some(l => l.message_id === x.id))) sb.ajouter('messages_lus', { message_id: m.id, salarie_id: moiId }).catch(() => {});
     setTimeout(compterNotifs, 800);
     document.querySelectorAll('[data-doc]').forEach(l => l.onclick = async (e) => {
       e.preventDefault(); try { window.open(await sb.lienTemporaire(l.dataset.doc, 300), '_blank', 'noopener'); } catch (er) { toast(messageErreur(er)); }
@@ -154,10 +173,10 @@
   // ---------- Demandes de congé et d'absence
   async function vueDemandes() {
     const ds = await sb.lire('demandes', { select: '*', salarie_id: 'eq.' + moiId, order: 'cree_le.desc', limit: '100' });
-    const lib = { attente: '<span class="etiquette alerte">en attente</span>', acceptee: '<span class="etiquette bon">acceptée</span>', refusee: '<span class="etiquette mauvais">refusée</span>' };
+    const lib = { attente: '<span class="etiquette alerte">en attente</span>', acceptee: '<span class="etiquette bon">acceptée</span>', refusee: '<span class="etiquette mauvais">refusée</span>', annulee: '<span class="etiquette">annulée</span>' };
     $('#vue').innerHTML = `<form class="carte pile" id="nd"><h2>Nouvelle demande</h2>
       <div class="grille2">
-        <label class="champ">Type<select id="t"><option>Congés payés</option><option>Absence / indisponibilité</option><option>Récupération</option><option>Autre</option></select></label>
+        <label class="champ">Type<select id="t"><option>Congés payés</option><option>Absence / indisponibilité</option><option>Récupération</option><option>Échange de service</option><option>Modification d’horaires</option><option>Autre demande</option></select></label>
         <label class="champ">Du<input type="date" id="du" required></label>
         <label class="champ">Au<input type="date" id="au" required></label>
       </div>
@@ -168,9 +187,11 @@
       <label class="champ">Justificatif (facultatif)<input type="file" id="pj" accept="application/pdf,image/*"></label>
       <div id="msg" class="message cache" role="alert"></div>
       <button class="bouton" type="submit">Envoyer la demande</button></form>
-      <div class="carte"><h2>Mes demandes</h2>${ds.length ? `<div class="defile"><table class="tableau"><thead><tr><th>Type</th><th>Période</th><th>État</th><th>Réponse</th></tr></thead><tbody>
-      ${ds.map(d => `<tr><td>${esc(d.type)}</td><td>${esc(dateCourte(d.du))}${d.au !== d.du ? ' → ' + esc(dateCourte(d.au)) : ''}${d.debut ? '<br>' + hm(d.debut) + '–' + hm(d.fin) : ''}</td><td>${lib[d.statut] || ''}</td><td>${esc(d.reponse || '')}</td></tr>`).join('')}
+      <div class="carte"><h2>Mes demandes</h2>${ds.length ? `<div class="defile"><table class="tableau"><thead><tr><th>Type</th><th>Période</th><th>État</th><th>Réponse</th><th></th></tr></thead><tbody>
+      ${ds.map(d => `<tr><td>${esc(d.type)}</td><td>${esc(dateCourte(d.du))}${d.au !== d.du ? ' → ' + esc(dateCourte(d.au)) : ''}${d.debut ? '<br>' + hm(d.debut) + '–' + hm(d.fin) : ''}</td><td>${lib[d.statut] || ''}</td><td>${esc(d.reponse || '')}</td>
+        <td>${d.statut === 'attente' ? `<button class="bouton discret petit" data-annuler="${d.id}">Annuler</button>` : ''}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="vide">Aucune demande.</div>'}</div>`;
+    document.querySelectorAll('[data-annuler]').forEach(b => b.onclick = async () => { try { await sb.rpc('annuler_demande', { p_id: b.dataset.annuler }); toast('Demande annulée.'); vueDemandes(); } catch (e) { toast(messageErreur(e)); } });
     $('#hor').onchange = () => { $('#heures').classList.toggle('cache', !$('#hor').checked); $('#nuit').classList.toggle('cache', !$('#hor').checked); };
     $('#du').onchange = () => { if (!$('#au').value || $('#au').value < $('#du').value) $('#au').value = $('#du').value; };
     $('#nd').onsubmit = async (e) => {
