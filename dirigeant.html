@@ -167,7 +167,8 @@
         : 'Semaine en <b>brouillon</b> : invisible des salariés, et aucune alerte de retard ou d’absence.'}</div>
       ${nbConflits ? `<div class="message erreur">${nbConflits} service(s) à vérifier (en rouge) : chevauchement, repos de moins de 11 h, plus de 10 h dans la journée ou jour de congé validé. Ces contrôles ne remplacent pas la vérification de vos propres règles.</div>` : ''}
       <div class="ligne">${publiee ? '<button class="bouton danger" id="depublier">Retirer la publication</button>' : '<button class="bouton" id="publier">Publier la semaine</button>'}
-        <button class="bouton second" id="ia" disabled title="Étape suivante">Proposition par l'IA (bientôt)</button></div></div>
+        <button class="bouton second" id="ia">Proposition par l'IA</button></div></div>
+      <div id="propIA"></div>
       <div class="carte defile"><div class="grille-planning">${grille}</div></div>
       <p class="doux petit">Cliquez dans une case pour ajouter un service, ou sur un service pour le modifier ou le supprimer. Une fin plus tôt que le début signifie le lendemain (22:00 → 02:00).</p>`;
     document.querySelectorAll('[data-sem]').forEach(b => b.onclick = () => { const d = Number(b.dataset.sem); semaine = d ? ajouterJours(semaine, d) : lundi(aujourdhui()); afficher(); });
@@ -182,6 +183,39 @@
     if ($('#depublier')) $('#depublier').onclick = async () => {
       if (!(await formulaire('Retirer la publication ?', [], 'Retirer', 'Les salariés ne verront plus cette semaine. Les alertes liées seront réexaminées.'))) return;
       try { await enregistrerSemaine(false); await sb.rpc('analyser_alertes', { p_etab: etabId }); toast('Publication retirée.'); afficher(); } catch (e) { toast(messageErreur(e)); }
+    };
+    $('#ia').onclick = async () => {
+      const v = await formulaire('Proposition de planning par l\u2019IA', [{ id: 'consignes', label: 'Vos contraintes et consignes pour la semaine', type: 'textarea', requis: true }], 'Demander une proposition',
+        'Envoyé à Claude : pour chaque salarié un code (S1, S2…), son contrat, son poste et ses disponibilités, les congés validés de la semaine et vos consignes. Jamais les noms, coordonnées ou pointages. Rien n\u2019est appliqué sans votre accord.');
+      if (!v) return;
+      const zone = $('#propIA'); zone.innerHTML = '<div class="carte"><p class="doux">L\u2019IA prépare une proposition\u2026</p></div>';
+      let p;
+      try { p = await sb.fonction('planning-ia', { etab_id: etabId, lundi: semaine, consignes: v.consignes }); }
+      catch (e) { zone.innerHTML = `<div class="message erreur">${esc(e.code === 'ia_non_configuree' ? 'L\u2019assistant n\u2019est pas encore activé (clé de l\u2019API Claude non installée). Le planning reste modifiable à la main.' : messageErreur(e) + ' Le planning reste modifiable à la main.')}</div>`; return; }
+      const nomDe = id => { const s = sal.find(x => x.id === id); return s ? s.prenom + ' ' + s.nom : '?'; };
+      zone.innerHTML = `<div class="carte pile"><h2 style="margin:0">Proposition de l\u2019IA (non appliquée)</h2>
+        <div class="defile"><table class="tableau"><thead><tr><th>Salarié</th><th>Heures proposées (calcul du logiciel)</th><th>Contrat</th></tr></thead><tbody>
+        ${sal.map(s => { const t = p.totaux_minutes[s.id] || 0, c = s.contrat_heures ? s.contrat_heures * 60 : null;
+          return `<tr><td>${esc(s.prenom)} ${esc(s.nom)}</td><td>${duree(t)}</td><td style="color:${c && t > c ? 'var(--mauvais)' : 'inherit'}">${c ? duree(c) + (t > c ? ' \u2014 dépassé' : '') : ''}</td></tr>`; }).join('')}
+        </tbody></table></div>
+        <details><summary>${p.creneaux.length} service(s) proposés</summary><ul>${p.creneaux.map(c => `<li>${esc(nomDe(c.salarie_id))} \u2014 ${esc(dateCourte(c.jour))} ${esc(c.debut)}\u2013${esc(c.fin)} ${esc(c.poste || '')}</li>`).join('')}</ul></details>
+        ${p.questions_ouvertes.length ? `<div class="message info"><b>Questions ouvertes (${p.questions_ouvertes.length})</b><ul>${p.questions_ouvertes.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>` : ''}
+        ${p.remarques.length ? `<div class="message erreur"><b>Contraintes non respectées selon l\u2019IA</b><ul>${p.remarques.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>` : ''}
+        ${p.rejetes.length ? `<p class="petit" style="color:var(--mauvais)">${p.rejetes.length} proposition(s) invalide(s) écartée(s) par le logiciel.</p>` : ''}
+        <p class="doux petit" style="margin:0">Les contraintes écrites en texte ne sont pas toutes vérifiées automatiquement : relisez la proposition. Coût de cette demande : environ ${esc(p.usage.cout_dollars)} $ (${p.usage.jetons_entree} + ${p.usage.jetons_sortie} jetons, ${esc(p.usage.modele)}).</p>
+        <div class="ligne"><button class="bouton" id="appliquer">Appliquer en brouillon</button><button class="bouton discret" id="ignorer">Ignorer</button></div></div>`;
+      $('#ignorer').onclick = () => { zone.innerHTML = ''; };
+      $('#appliquer').onclick = async () => {
+        if (publiee) return toast('Retirez d\u2019abord la publication : la proposition s\u2019applique seulement en brouillon.');
+        const w = await formulaire('Appliquer la proposition en brouillon ?', [{ id: 'remplacer', label: 'Supprimer d\u2019abord les services déjà saisis pour cette semaine', type: 'checkbox' }], 'Appliquer',
+          p.questions_ouvertes.length ? 'Questions encore ouvertes : ' + p.questions_ouvertes.join(' / ') : 'La semaine restera en brouillon : vous vérifiez, puis vous publiez.');
+        if (!w) return;
+        try {
+          if (w.remplacer) for (const c of cr.filter(x => x.jour >= semaine && x.jour <= fin)) await sb.modifier('creneaux', { id: 'eq.' + c.id }, { supprime: true, maj_par: ctx.user.id, maj_le: new Date().toISOString() });
+          for (const c of p.creneaux) await sb.ajouter('creneaux', { etab_id: etabId, ...c, maj_par: ctx.user.id, note: 'proposé par l\u2019IA' });
+          toast('Proposition appliquée en brouillon. Vérifiez puis publiez.'); afficher();
+        } catch (e) { toast(messageErreur(e)); }
+      };
     };
     const editer = async (c, salId, j) => {
       const v = await formulaire(c ? 'Modifier le service' : 'Nouveau service', [
