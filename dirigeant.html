@@ -386,7 +386,39 @@
         <select id="parService"><option value="non" ${r.alerte_par_service ? '' : 'selected'}>Aucune alerte s'il y a au moins un pointage dans la journée (comportement des versions précédentes)</option>
         <option value="oui" ${r.alerte_par_service ? 'selected' : ''}>Une alerte pour chaque service sans entrée pointée</option></select></label>
       <p class="doux petit" style="margin:0">Ce choix vous appartient ; la valeur initiale reproduit le comportement des versions précédentes.</p>
-      <div id="msg" class="message cache"></div><button class="bouton" type="submit">Enregistrer</button></form>`;
+      <div id="msg" class="message cache"></div><button class="bouton" type="submit">Enregistrer</button></form>
+      <div class="carte pile"><h2 style="margin:0">Sauvegardes</h2><div id="etatSauv" class="doux petit">Chargement…</div>
+        <div class="ligne"><button class="bouton second" id="telecharger">Télécharger une sauvegarde complète</button>
+        <label class="bouton discret" style="cursor:pointer">Restaurer depuis un fichier…<input type="file" id="fichierRest" accept="application/json,.json" class="cache"></label></div>
+        <p class="doux petit" style="margin:0">Le fichier téléchargé contient des données personnelles (salariés, pointages, justificatifs) : rangez-le en lieu sûr. Une restauration commence toujours par une sauvegarde de l\u2019état actuel, et conserve par défaut les pointages enregistrés après la date de la sauvegarde.</p></div>`;
+    sb.fonction('sauvegarde', { action: 'etat', etab_id: etabId }).then(e => {
+      const d = (e.suivi || []).find(x => x.type === 'automatique');
+      $('#etatSauv').innerHTML = (d ? `Dernière sauvegarde automatique : ${esc(new Date(d.le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }))} \u2014 ${d.ok ? 'réussie' : '<b style="color:var(--mauvais)">échec : ' + esc(d.erreur || '') + '</b>'}` : 'Aucune sauvegarde automatique pour l\u2019instant.')
+        + `<br>Copie hors de la base principale : ${e.externe_configure ? 'oui (stockage externe)' : '<b>non configurée</b> (espace privé du projet seulement)'} \u00b7 chiffrement : ${e.chiffrement_configure ? 'oui' : '<b>non configuré</b>'}`;
+    }).catch(x => { $('#etatSauv').textContent = messageErreur(x); });
+    $('#telecharger').onclick = async () => {
+      try {
+        const r = await sb.fonction('sauvegarde', { action: 'telecharger', etab_id: etabId });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(r.archive)], { type: 'application/json' }));
+        a.download = `sauvegarde-${(etab.nom || 'etablissement').replace(/[^\w-]+/g, '-')}-${new Date().toISOString().slice(0, 16).replace(':', 'h')}.json`; a.click();
+        toast('Sauvegarde téléchargée.');
+      } catch (x) { toast(messageErreur(x)); }
+    };
+    $('#fichierRest').onchange = async e => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      let archive; try { archive = JSON.parse(await f.text()); } catch (x) { return toast('Fichier illisible.'); }
+      if (archive.format !== 'pointeuse-portail') return toast('Ce fichier n\u2019est pas une sauvegarde du portail.');
+      const v = await formulaire('Restaurer la sauvegarde du ' + new Date(archive.cree_le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }) + ' ?', [
+        { id: 'conserver', label: 'Conserver les pointages enregistrés après cette date', type: 'checkbox', valeur: true },
+        { id: 'conf', label: 'Tapez RESTAURER pour confirmer', requis: true }], 'Restaurer',
+        `Établissement : ${archive.etab && archive.etab.nom}. Salariés, planning, demandes, alertes et justificatifs reviendront à leur état de cette date. Le journal n\u2019est jamais effacé.`);
+      if (!v) return;
+      if (v.conf !== 'RESTAURER') return toast('Confirmation incorrecte : rien n\u2019a été fait.');
+      try {
+        const r = await sb.fonction('sauvegarde', { action: 'restaurer', etab_id: etabId, archive, confirmation: 'RESTAURER', conserver_pointages: v.conserver });
+        toast(`Restauration faite. Pointages récents conservés : ${r.pointages_recents_conserves}. Fichiers renvoyés : ${r.fichiers.remis}.`); afficher();
+      } catch (x) { toast(messageErreur(x)); }
+    };
     $('#fr').onsubmit = async e => {
       e.preventDefault(); const m = $('#msg');
       try {
