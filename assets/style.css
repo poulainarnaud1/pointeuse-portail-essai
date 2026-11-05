@@ -25,11 +25,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .essai { background: #fff4d6; color: #6b4a00; text-align: center; font-size: .85rem; padding: 4px 16px; }
 
 header.tete { background: var(--surface); border-bottom: 1px solid var(--ligne); position: sticky; top: 0; z-index: 5; }
-header.tete .enveloppe { display: flex; align-items: center; gap: 12px; min-height: 60px; flex-wrap: wrap; }
+header.tete > .enveloppe:first-child { display: flex; align-items: center; gap: 12px; min-height: 60px; flex-wrap: wrap; }
 header.tete img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 1px solid var(--ligne); }
 header.tete h1 { font-size: 1.1rem; margin: 0; flex: 1 1 160px; min-width: 0; }
 header.tete .qui { color: var(--doux); font-size: .9rem; }
-nav.onglets { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; border-top: 1px solid var(--ligne); }
+nav.onglets { display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: none; border-top: 1px solid var(--ligne); }
 nav.onglets button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 10px 12px; cursor: pointer; white-space: nowrap; color: var(--doux); }
 nav.onglets button[aria-selected="true"] { color: var(--texte); border-bottom-color: var(--accent); font-weight: 600; }
 .pastille { background: var(--mauvais); color: #fff; border-radius: 999px; font-size: .75rem; padding: 0 7px; margin-left: 4px; }
