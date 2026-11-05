@@ -4,85 +4,54 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Espace dirigeant — Portail de pointage</title>
-<link rel="stylesheet" href="assets/style.css?v=3">
+<link rel="stylesheet" href="assets/style.css?v=4">
 </head>
 <body>
 <header class="tete">
   <div class="enveloppe">
+    <img id="logo" alt="" class="cache">
     <h1 id="nomEtab">Espace dirigeant</h1>
     <span class="qui" id="qui"></span>
     <button class="bouton discret petit" id="deco">Se déconnecter</button>
   </div>
   <nav class="onglets enveloppe" role="tablist" id="onglets">
     <button role="tab" data-o="jour" aria-selected="true">Pointages</button>
+    <button role="tab" data-o="planning">Planning</button>
+    <button role="tab" data-o="demandes">Congés et demandes <span class="pastille cache" id="nbDem"></span></button>
+    <button role="tab" data-o="alertes">Retards et absences <span class="pastille cache" id="nbAl"></span></button>
     <button role="tab" data-o="equipe">Équipe et accès</button>
     <button role="tab" data-o="journal">Journal</button>
+    <button role="tab" data-o="reglages">Réglages</button>
   </nav>
 </header>
 <main class="enveloppe"><div class="pile" id="vue"><p class="doux">Chargement…</p></div></main>
 
-<script src="assets/config.js?v=3"></script>
-<script src="assets/sb.js?v=3"></script>
-<script src="assets/commun.js?v=3"></script>
+<script src="assets/config.js?v=4"></script>
+<script src="assets/sb.js?v=4"></script>
+<script src="assets/commun.js?v=4"></script>
 <script>
 (async function () {
-  const { $, esc, heure, dateCourte, dateLongue, ajouterJours, aujourdhui, duree, messageErreur, toast } = P;
+  const { $, esc, heure, dateCourte, dateLongue, ajouterJours, lundi, aujourdhui, hm, duree, messageErreur, toast, formulaire } = P;
   const ctx = await P.garde(['dirigeant']);
   if (!ctx) return;
   const etabId = ctx.membre.etab_id;
-  $('#nomEtab').textContent = ctx.etab.nom;
+  let etab = ctx.etab;
+  const majEntete = () => {
+    $('#nomEtab').textContent = etab.nom;
+    const l = (etab.reglages || {}).logo; $('#logo').classList.toggle('cache', !l); if (l) $('#logo').src = l;
+    P.appliquerIdentite(etab);
+  };
+  majEntete();
   $('#qui').textContent = (ctx.user.user_metadata && ctx.user.user_metadata.nom) || ctx.user.email;
   $('#deco').onclick = async () => { await sb.deconnexion(); location.replace('index.html'); };
-  let onglet = 'jour', jour = aujourdhui();
+  let onglet = 'jour', jour = aujourdhui(), semaine = lundi(aujourdhui());
   document.querySelectorAll('#onglets button').forEach(b => b.onclick = () => {
     onglet = b.dataset.o; document.querySelectorAll('#onglets button').forEach(x => x.setAttribute('aria-selected', x === b)); afficher();
   });
   const retour = () => new URL('activer.html', location.href).href;
-  const demanderMotif = (q) => { const m = prompt(q); return m && m.trim().length >= 3 ? m.trim() : null; };
+  const minutes = t => { const [h, m] = hm(t).split(':').map(Number); return h * 60 + m; };
+  const dureeCreneau = c => { let d = minutes(c.fin) - minutes(c.debut); if (d <= 0) d += 1440; return d; };
 
-  // ---------- Pointages du jour, corrections avec motif
-  async function vueJour() {
-    const sal = await sb.lire('salaries', { select: 'id,prenom,nom,actif', etab_id: 'eq.' + etabId, order: 'prenom' });
-    const pts = await sb.lire('pointages', { select: '*', etab_id: 'eq.' + etabId, and: `(jour.gte.${ajouterJours(jour, -1)},jour.lte.${ajouterJours(jour, 1)})`, order: 'horodatage' });
-    const lignes = sal.filter(s => s.actif || pts.some(p => p.salarie_id === s.id && p.jour === jour)).map(s => {
-      const miens = pts.filter(p => p.salarie_id === s.id);
-      const { jours, incomplets } = P.heuresParJour(miens);
-      const du = miens.filter(p => p.jour === jour);
-      return `<tr><td>${esc(s.prenom)} ${esc(s.nom)}</td>
-        <td>${du.map(p => `<span class="${p.supprime ? 'doux' : ''}" style="${p.supprime ? 'text-decoration:line-through' : ''}">${p.sens === 'entree' ? 'Entrée' : 'Sortie'} ${heure(p.horodatage)}</span>
-          ${p.supprime ? '' : `<button class="bouton discret petit" data-corr="${p.id}" data-h="${p.horodatage}">Corriger</button>`}`).join('<br>') || '<span class="doux">—</span>'}
-          ${incomplets.some(p => p.jour === jour) ? '<br><span class="etiquette alerte">pointage incomplet</span>' : ''}</td>
-        <td>${jours[jour] ? duree(jours[jour].minutes) : '—'}</td>
-        <td><button class="bouton second petit" data-ajout="${s.id}">Ajouter</button></td></tr>`;
-    }).join('');
-    $('#vue').innerHTML = `<div class="carte"><div class="ligne entre"><h2 style="margin:0">Pointages du ${esc(dateLongue(jour))}</h2>
-      <div class="ligne"><button class="bouton discret petit" data-j="-1">‹</button><input type="date" id="j" value="${jour}" style="width:auto"><button class="bouton discret petit" data-j="1">›</button></div></div>
-      <div class="defile" style="margin-top:12px"><table class="tableau"><thead><tr><th>Salarié</th><th>Pointages</th><th>Heures</th><th></th></tr></thead><tbody>${lignes || '<tr><td colspan="4" class="doux">Aucun salarié.</td></tr>'}</tbody></table></div>
-      <p class="doux petit">Heures calculées à partir des pointages ; ce n'est pas un calcul de paie. Toute correction exige un motif et reste inscrite au journal.</p></div>`;
-    document.querySelectorAll('[data-j]').forEach(b => b.onclick = () => { jour = ajouterJours(jour, Number(b.dataset.j)); afficher(); });
-    $('#j').onchange = e => { jour = e.target.value || aujourdhui(); afficher(); };
-    document.querySelectorAll('[data-corr]').forEach(b => b.onclick = async () => {
-      const choix = prompt('Nouvelle heure (HH:MM), ou SUPPRIMER pour annuler ce pointage :', heure(b.dataset.h));
-      if (!choix) return;
-      const motif = demanderMotif('Motif de la correction (obligatoire) :'); if (!motif) return toast('Motif obligatoire.');
-      try {
-        if (choix.trim().toUpperCase() === 'SUPPRIMER') await sb.rpc('corriger_pointage', { p_id: b.dataset.corr, p_horodatage: null, p_sens: null, p_supprime: true, p_motif: motif });
-        else {
-          if (!/^\d{1,2}:\d{2}$/.test(choix.trim())) return toast('Heure invalide.');
-          const d = new Date(b.dataset.h); const parisJour = P.jourCivil(d);
-          await sb.rpc('corriger_pointage', { p_id: b.dataset.corr, p_horodatage: horodatageParis(parisJour, choix.trim()), p_sens: null, p_supprime: null, p_motif: motif });
-        }
-        toast('Correction enregistrée.'); afficher();
-      } catch (e) { toast(messageErreur(e)); }
-    });
-    document.querySelectorAll('[data-ajout]').forEach(b => b.onclick = async () => {
-      const h = prompt('Heure du pointage à ajouter pour le ' + dateCourte(jour) + ' (HH:MM) :'); if (!h || !/^\d{1,2}:\d{2}$/.test(h.trim())) return;
-      const sens = confirm('OK = entrée, Annuler = sortie') ? 'entree' : 'sortie';
-      const motif = demanderMotif('Motif (obligatoire) :'); if (!motif) return toast('Motif obligatoire.');
-      try { await sb.rpc('ajouter_pointage', { p_salarie: b.dataset.ajout, p_horodatage: horodatageParis(jour, h.trim()), p_sens: sens, p_motif: motif }); toast('Pointage ajouté.'); afficher(); }
-      catch (e) { toast(messageErreur(e)); }
-    });
-  }
   // Heure locale de Paris -> instant exact (gère l'heure d'été).
   function horodatageParis(iso, hhmm) {
     const [h, m] = hhmm.split(':').map(Number);
@@ -92,22 +61,220 @@
     const vu = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute);
     return new Date(supp - (vu - supp)).toISOString();
   }
+  async function compteurs() {
+    try {
+      const d = await sb.lire('demandes', { select: 'id', etab_id: 'eq.' + etabId, statut: 'eq.attente' });
+      const a = await sb.lire('alertes', { select: 'id,a_reexaminer,statut,annulee,type', etab_id: 'eq.' + etabId, annulee: 'eq.false' });
+      const n = a.filter(x => x.a_reexaminer || (x.type === 'absence' && x.statut === 'repondu')).length;
+      $('#nbDem').textContent = d.length; $('#nbDem').classList.toggle('cache', !d.length);
+      $('#nbAl').textContent = n; $('#nbAl').classList.toggle('cache', !n);
+    } catch (e) { /* sans gravité */ }
+  }
 
-  // ---------- Équipe : fiches, comptes, codes de pointage, départs
+  // ================= Pointages du jour, corrections avec motif
+  async function vueJour() {
+    const sal = await sb.lire('salaries', { select: 'id,prenom,nom,actif', etab_id: 'eq.' + etabId, order: 'prenom' });
+    const pts = await sb.lire('pointages', { select: '*', etab_id: 'eq.' + etabId, and: `(jour.gte.${ajouterJours(jour, -1)},jour.lte.${ajouterJours(jour, 1)})`, order: 'horodatage' });
+    const lignes = sal.filter(s => s.actif || pts.some(p => p.salarie_id === s.id && p.jour === jour)).map(s => {
+      const miens = pts.filter(p => p.salarie_id === s.id);
+      const { jours, incomplets } = P.heuresParJour(miens);
+      const du = miens.filter(p => p.jour === jour);
+      return `<tr><td>${esc(s.prenom)} ${esc(s.nom)}</td>
+        <td>${du.map(p => `<span class="${p.supprime ? 'doux' : ''}" style="${p.supprime ? 'text-decoration:line-through' : ''}">${p.sens === 'entree' ? 'Entrée' : 'Sortie'} ${heure(p.horodatage)}${p.source === 'dirigeant' ? ' <span class="etiquette">manuel</span>' : ''}</span>
+          ${p.supprime ? '' : `<button class="bouton discret petit" data-corr="${p.id}" data-h="${p.horodatage}" data-s="${p.sens}">Corriger</button>`}`).join('<br>') || '<span class="doux">—</span>'}
+          ${incomplets.some(p => p.jour === jour) ? '<br><span class="etiquette alerte">pointage incomplet</span>' : ''}</td>
+        <td>${jours[jour] ? duree(jours[jour].minutes) : '—'}</td>
+        <td><button class="bouton second petit" data-ajout="${s.id}" data-nom="${esc(s.prenom)}">Ajouter</button></td></tr>`;
+    }).join('');
+    $('#vue').innerHTML = `<div class="carte"><div class="ligne entre"><h2 style="margin:0">Pointages du ${esc(dateLongue(jour))}</h2>
+      <div class="ligne"><button class="bouton discret petit" data-j="-1" aria-label="Jour précédent">‹</button><input type="date" id="j" value="${jour}" style="width:auto"><button class="bouton discret petit" data-j="1" aria-label="Jour suivant">›</button></div></div>
+      <div class="defile" style="margin-top:12px"><table class="tableau"><thead><tr><th>Salarié</th><th>Pointages</th><th>Heures</th><th></th></tr></thead><tbody>${lignes || '<tr><td colspan="4" class="doux">Aucun salarié.</td></tr>'}</tbody></table></div>
+      <p class="doux petit">Heures calculées à partir des pointages ; ce n'est pas un calcul de paie. Toute correction exige un motif et reste inscrite au journal.</p></div>`;
+    document.querySelectorAll('[data-j]').forEach(b => b.onclick = () => { jour = ajouterJours(jour, Number(b.dataset.j)); afficher(); });
+    $('#j').onchange = e => { jour = e.target.value || aujourdhui(); afficher(); };
+    document.querySelectorAll('[data-corr]').forEach(b => b.onclick = async () => {
+      const v = await formulaire('Corriger un pointage', [
+        { id: 'action', label: 'Action', type: 'select', valeur: 'heure', options: [['heure', 'Changer l’heure ou le sens'], ['suppr', 'Annuler ce pointage']] },
+        { id: 'heure', label: 'Heure (Paris)', type: 'time', valeur: heure(b.dataset.h) },
+        { id: 'sens', label: 'Sens', type: 'select', valeur: b.dataset.s, options: [['entree', 'Entrée'], ['sortie', 'Sortie']] },
+        { id: 'motif', label: 'Motif (obligatoire)', requis: true }], 'Enregistrer la correction', 'Les anciennes valeurs restent inscrites au journal.');
+      if (!v) return;
+      try {
+        const jourParis = P.jourCivil(new Date(b.dataset.h));
+        await sb.rpc('corriger_pointage', v.action === 'suppr'
+          ? { p_id: b.dataset.corr, p_horodatage: null, p_sens: null, p_supprime: true, p_motif: v.motif }
+          : { p_id: b.dataset.corr, p_horodatage: horodatageParis(jourParis, v.heure), p_sens: v.sens, p_supprime: null, p_motif: v.motif });
+        toast('Correction enregistrée.'); afficher();
+      } catch (e) { toast(messageErreur(e)); }
+    });
+    document.querySelectorAll('[data-ajout]').forEach(b => b.onclick = async () => {
+      const v = await formulaire('Ajouter un pointage pour ' + b.dataset.nom, [
+        { id: 'heure', label: 'Heure (Paris) le ' + dateCourte(jour), type: 'time', requis: true },
+        { id: 'sens', label: 'Sens', type: 'select', valeur: 'entree', options: [['entree', 'Entrée'], ['sortie', 'Sortie']] },
+        { id: 'motif', label: 'Motif (obligatoire)', requis: true }], 'Ajouter');
+      if (!v) return;
+      try { await sb.rpc('ajouter_pointage', { p_salarie: b.dataset.ajout, p_horodatage: horodatageParis(jour, v.heure), p_sens: v.sens, p_motif: v.motif }); toast('Pointage ajouté.'); afficher(); }
+      catch (e) { toast(messageErreur(e)); }
+    });
+  }
+
+  // ================= Planning : brouillon, contrôles, publication
+  async function vuePlanning() {
+    const fin = ajouterJours(semaine, 6);
+    const sal = await sb.lire('salaries', { select: 'id,prenom,nom,poste,contrat_heures', etab_id: 'eq.' + etabId, actif: 'eq.true', order: 'prenom' });
+    const cr = await sb.lire('creneaux', { select: '*', etab_id: 'eq.' + etabId, supprime: 'eq.false', and: `(jour.gte.${ajouterJours(semaine, -1)},jour.lte.${ajouterJours(fin, 1)})`, order: 'jour,debut' });
+    const conges = await sb.lire('demandes', { select: 'salarie_id,type,du,au,debut,fin', etab_id: 'eq.' + etabId, statut: 'eq.acceptee', du: 'lte.' + fin, au: 'gte.' + semaine });
+    const [sem] = await sb.lire('semaines', { select: '*', etab_id: 'eq.' + etabId, lundi: 'eq.' + semaine });
+    const publiee = !!(sem && sem.publiee);
+    const conflits = {};
+    // contrôles : chevauchement, repos < 11 h, plus de 10 h dans la journée, service un jour de congé validé
+    for (const s of sal) {
+      const miens = cr.filter(c => c.salarie_id === s.id).map(c => {
+        const deb = Date.parse(c.jour + 'T00:00:00Z') / 60000 + minutes(c.debut);
+        return { c, deb, fin: deb + dureeCreneau(c) };
+      }).sort((a, b) => a.deb - b.deb);
+      for (let i = 0; i < miens.length; i++) {
+        const a = miens[i], b = miens[i + 1];
+        if (b && b.deb < a.fin) (conflits[b.c.id] = conflits[b.c.id] || []).push('chevauche un autre service');
+        else if (b && b.c.jour !== a.c.jour && b.deb - a.fin < 11 * 60) (conflits[b.c.id] = conflits[b.c.id] || []).push('repos de moins de 11 h depuis le service précédent');
+        const total = miens.filter(x => x.c.jour === a.c.jour).reduce((t, x) => t + (x.fin - x.deb), 0);
+        if (total > 600) (conflits[a.c.id] = conflits[a.c.id] || []).push('plus de 10 h prévues ce jour-là');
+        if (conges.some(d => d.salarie_id === s.id && !d.debut && d.du <= a.c.jour && d.au >= a.c.jour)) (conflits[a.c.id] = conflits[a.c.id] || []).push('jour de congé ou d’absence validé');
+      }
+    }
+    const nbConflits = Object.keys(conflits).filter(id => cr.some(c => c.id === id && c.jour >= semaine && c.jour <= fin)).length;
+    let grille = `<div class="tete-col">Salarié</div>` + [0, 1, 2, 3, 4, 5, 6].map(i => `<div class="tete-col">${esc(dateCourte(ajouterJours(semaine, i)))}</div>`).join('') + `<div class="tete-col">Total</div>`;
+    for (const s of sal) {
+      let total = 0;
+      grille += `<div><b>${esc(s.prenom)}</b> ${esc(s.nom)}<br><span class="doux petit">${esc(s.poste || '')}</span></div>`;
+      for (let i = 0; i < 7; i++) {
+        const j = ajouterJours(semaine, i);
+        const c = cr.filter(x => x.salarie_id === s.id && x.jour === j);
+        c.forEach(x => total += dureeCreneau(x));
+        const cg = conges.filter(d => d.salarie_id === s.id && d.du <= j && d.au >= j);
+        grille += `<div class="case" data-ajout-cr="${s.id}" data-jour="${j}">
+          ${c.map(x => `<div class="creneau ${conflits[x.id] ? 'conflit' : ''}" data-cr="${x.id}" title="${esc((conflits[x.id] || []).join(', '))}">${hm(x.debut)}–${hm(x.fin)}${x.poste ? '<br><span class="doux petit">' + esc(x.poste) + '</span>' : ''}${conflits[x.id] ? '<br><span class="petit" style="color:var(--mauvais)">' + esc(conflits[x.id][0]) + '</span>' : ''}</div>`).join('')}
+          ${cg.map(d => `<div class="creneau" style="border-left-color:var(--bon)">${esc(d.type)}${d.debut ? ' ' + hm(d.debut) + '–' + hm(d.fin) : ''}</div>`).join('')}
+          ${!c.length ? '<span class="doux petit">+</span>' : ''}</div>`;
+      }
+      const contrat = s.contrat_heures ? Number(s.contrat_heures) * 60 : null;
+      grille += `<div><b>${duree(total)}</b>${contrat ? `<br><span class="petit" style="color:${total > contrat ? 'var(--alerte)' : 'var(--doux)'}">contrat ${duree(contrat)}</span>` : ''}</div>`;
+    }
+    $('#vue').innerHTML = `<div class="carte pile"><div class="ligne entre"><h2 style="margin:0">Planning</h2><div class="ligne">
+        <button class="bouton discret petit" data-sem="-7" aria-label="Semaine précédente">‹</button><span>Semaine du ${esc(dateCourte(semaine))}</span>
+        <button class="bouton discret petit" data-sem="7" aria-label="Semaine suivante">›</button><button class="bouton discret petit" data-sem="0">Cette semaine</button></div></div>
+      <div class="message ${publiee ? 'ok' : 'info'}">${publiee ? `Semaine <b>publiée</b>${sem.publiee_le ? ' le ' + esc(new Date(sem.publiee_le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' })) : ''} : visible des salariés, et prise en compte pour les retards et absences.`
+        : 'Semaine en <b>brouillon</b> : invisible des salariés, et aucune alerte de retard ou d’absence.'}</div>
+      ${nbConflits ? `<div class="message erreur">${nbConflits} service(s) à vérifier (en rouge) : chevauchement, repos de moins de 11 h, plus de 10 h dans la journée ou jour de congé validé. Ces contrôles ne remplacent pas la vérification de vos propres règles.</div>` : ''}
+      <div class="ligne">${publiee ? '<button class="bouton danger" id="depublier">Retirer la publication</button>' : '<button class="bouton" id="publier">Publier la semaine</button>'}
+        <button class="bouton second" id="ia" disabled title="Étape suivante">Proposition par l'IA (bientôt)</button></div></div>
+      <div class="carte defile"><div class="grille-planning">${grille}</div></div>
+      <p class="doux petit">Cliquez dans une case pour ajouter un service, ou sur un service pour le modifier ou le supprimer. Une fin plus tôt que le début signifie le lendemain (22:00 → 02:00).</p>`;
+    document.querySelectorAll('[data-sem]').forEach(b => b.onclick = () => { const d = Number(b.dataset.sem); semaine = d ? ajouterJours(semaine, d) : lundi(aujourdhui()); afficher(); });
+    const enregistrerSemaine = async (pub) => {
+      const ligne = { etab_id: etabId, lundi: semaine, publiee: pub, publiee_le: pub ? new Date().toISOString() : null, publiee_par: pub ? ctx.user.id : null };
+      if (sem) await sb.modifier('semaines', { etab_id: 'eq.' + etabId, lundi: 'eq.' + semaine }, ligne); else await sb.ajouter('semaines', ligne);
+    };
+    if ($('#publier')) $('#publier').onclick = async () => {
+      if (nbConflits && !(await formulaire('Publier malgré les services à vérifier ?', [], 'Publier quand même', nbConflits + ' service(s) sont signalés en rouge.'))) return;
+      try { await enregistrerSemaine(true); await sb.rpc('analyser_alertes', { p_etab: etabId }); toast('Semaine publiée : visible des salariés.'); afficher(); } catch (e) { toast(messageErreur(e)); }
+    };
+    if ($('#depublier')) $('#depublier').onclick = async () => {
+      if (!(await formulaire('Retirer la publication ?', [], 'Retirer', 'Les salariés ne verront plus cette semaine. Les alertes liées seront réexaminées.'))) return;
+      try { await enregistrerSemaine(false); await sb.rpc('analyser_alertes', { p_etab: etabId }); toast('Publication retirée.'); afficher(); } catch (e) { toast(messageErreur(e)); }
+    };
+    const editer = async (c, salId, j) => {
+      const v = await formulaire(c ? 'Modifier le service' : 'Nouveau service', [
+        { id: 'debut', label: 'Début', type: 'time', valeur: c ? hm(c.debut) : '11:00', requis: true },
+        { id: 'fin', label: 'Fin (plus tôt que le début = le lendemain)', type: 'time', valeur: c ? hm(c.fin) : '15:00', requis: true },
+        { id: 'poste', label: 'Poste', valeur: c ? (c.poste || '') : (sal.find(s => s.id === salId) || {}).poste || '' },
+        { id: 'note', label: 'Note', valeur: c ? c.note : '' },
+        ...(c ? [{ id: 'suppr', label: 'Supprimer ce service', type: 'checkbox' }] : [])], c ? 'Enregistrer' : 'Ajouter',
+        dateLongue(j) + (publiee ? ' — semaine publiée : la modification est visible tout de suite.' : ''));
+      if (!v) return;
+      if (v.debut === v.fin) return toast('Le début et la fin sont identiques.');
+      try {
+        if (c && v.suppr) await sb.modifier('creneaux', { id: 'eq.' + c.id }, { supprime: true, maj_le: new Date().toISOString(), maj_par: ctx.user.id });
+        else if (c) await sb.modifier('creneaux', { id: 'eq.' + c.id }, { debut: v.debut, fin: v.fin, poste: v.poste || null, note: v.note, maj_le: new Date().toISOString(), maj_par: ctx.user.id });
+        else await sb.ajouter('creneaux', { etab_id: etabId, salarie_id: salId, jour: j, debut: v.debut, fin: v.fin, poste: v.poste || null, note: v.note, maj_par: ctx.user.id });
+        if (publiee) await sb.rpc('analyser_alertes', { p_etab: etabId });
+        afficher();
+      } catch (e) { toast(messageErreur(e)); }
+    };
+    document.querySelectorAll('[data-cr]').forEach(el => el.onclick = e => { e.stopPropagation(); const c = cr.find(x => x.id === el.dataset.cr); editer(c, c.salarie_id, c.jour); });
+    document.querySelectorAll('[data-ajout-cr]').forEach(el => el.onclick = () => editer(null, el.dataset.ajoutCr, el.dataset.jour));
+  }
+
+  // ================= Demandes de congé et d'absence
+  async function vueDemandes() {
+    const sal = await sb.lire('salaries', { select: 'id,prenom,nom', etab_id: 'eq.' + etabId });
+    const nom = id => { const s = sal.find(x => x.id === id); return s ? s.prenom + ' ' + s.nom : '?'; };
+    const ds = await sb.lire('demandes', { select: '*', etab_id: 'eq.' + etabId, order: 'cree_le.desc', limit: '200' });
+    const docs = await sb.lire('documents', { select: 'demande_id,nom,chemin', etab_id: 'eq.' + etabId, demande_id: 'not.is.null' });
+    const lib = { attente: '<span class="etiquette alerte">en attente</span>', acceptee: '<span class="etiquette bon">acceptée</span>', refusee: '<span class="etiquette mauvais">refusée</span>' };
+    const tri = [...ds.filter(d => d.statut === 'attente'), ...ds.filter(d => d.statut !== 'attente')];
+    $('#vue').innerHTML = `<div class="carte"><h2>Congés et demandes</h2>${tri.length ? `<div class="defile"><table class="tableau"><thead><tr><th>Salarié</th><th>Demande</th><th>Période</th><th>État</th><th></th></tr></thead><tbody>
+      ${tri.map(d => `<tr><td>${esc(nom(d.salarie_id))}</td><td>${esc(d.type)}${d.message ? '<br><span class="doux petit">' + esc(d.message) + '</span>' : ''}
+        ${docs.filter(x => x.demande_id === d.id).map(x => `<br><a href="#" data-doc="${esc(x.chemin)}">${esc(x.nom)}</a>`).join('')}</td>
+        <td>${esc(dateCourte(d.du))}${d.au !== d.du ? ' → ' + esc(dateCourte(d.au)) : ''}${d.debut ? '<br>' + hm(d.debut) + '–' + hm(d.fin) : ''}</td>
+        <td>${lib[d.statut]}${d.reponse ? '<br><span class="doux petit">' + esc(d.reponse) + '</span>' : ''}</td>
+        <td>${d.statut === 'attente' ? `<div class="ligne"><button class="bouton petit" data-dec="acceptee" data-d="${d.id}">Accepter</button><button class="bouton danger petit" data-dec="refusee" data-d="${d.id}">Refuser</button></div>`
+          : `<button class="bouton discret petit" data-dec="revoir" data-d="${d.id}">Modifier la décision</button>`}</td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="vide">Aucune demande.</div>'}</div>`;
+    document.querySelectorAll('[data-doc]').forEach(l => l.onclick = async e => { e.preventDefault(); try { window.open(await sb.lienTemporaire(l.dataset.doc, 300), '_blank', 'noopener'); } catch (er) { toast(messageErreur(er)); } });
+    document.querySelectorAll('[data-dec]').forEach(b => b.onclick = async () => {
+      let statut = b.dataset.dec;
+      const champs = [{ id: 'reponse', label: 'Réponse au salarié' + (statut === 'refusee' ? ' (obligatoire)' : ' (facultatif)'), type: 'textarea', requis: statut === 'refusee' }];
+      if (statut === 'revoir') champs.unshift({ id: 'statut', label: 'Décision', type: 'select', valeur: 'acceptee', options: [['acceptee', 'Acceptée'], ['refusee', 'Refusée'], ['attente', 'Remettre en attente']] });
+      const v = await formulaire(statut === 'acceptee' ? 'Accepter la demande' : statut === 'refusee' ? 'Refuser la demande' : 'Modifier la décision', champs, 'Valider', 'La décision et l’état précédent sont inscrits au journal.');
+      if (!v) return;
+      if (statut === 'revoir') statut = v.statut;
+      try {
+        await sb.modifier('demandes', { id: 'eq.' + b.dataset.d }, { statut, reponse: v.reponse || null, decide_par: statut === 'attente' ? null : ctx.user.id, decide_le: statut === 'attente' ? null : new Date().toISOString() });
+        await sb.rpc('analyser_alertes', { p_etab: etabId });
+        toast('Décision enregistrée.'); afficher(); compteurs();
+      } catch (e) { toast(messageErreur(e)); }
+    });
+  }
+
+  // ================= Retards et absences
+  async function vueAlertes() {
+    const sal = await sb.lire('salaries', { select: 'id,prenom,nom', etab_id: 'eq.' + etabId });
+    const nom = id => { const s = sal.find(x => x.id === id); return s ? s.prenom + ' ' + s.nom : '?'; };
+    const al = await sb.lire('alertes', { select: '*', etab_id: 'eq.' + etabId, order: 'jour.desc,cree_le.desc', limit: '200' });
+    const docs = await sb.lire('documents', { select: 'alerte_id,nom,chemin', etab_id: 'eq.' + etabId, alerte_id: 'not.is.null' });
+    const etat = a => a.annulee ? `<span class="etiquette">annulée</span><br><span class="doux petit">${esc(a.motif_annulation || '')}</span>`
+      : a.a_reexaminer ? `<span class="etiquette alerte">à réexaminer</span><br><span class="doux petit">${esc(a.a_reexaminer.pourquoi || '')}</span>`
+      : a.type === 'retard' ? `<span class="etiquette alerte">retard ${a.minutes} min</span>`
+      : a.statut === 'repondu' ? '<span class="etiquette bon">réponse reçue</span>' : '<span class="etiquette mauvais">sans réponse</span>';
+    $('#vue').innerHTML = `<div class="carte pile"><div class="ligne entre"><h2 style="margin:0">Retards et absences</h2><button class="bouton second petit" id="calc">Recalculer maintenant</button></div>
+      <p class="doux petit" style="margin:0">Calculées par le serveur toutes les 10 minutes, seulement pour les semaines publiées et hors congés ou absences validés. Une alerte n'est jamais effacée : elle est annulée avec son motif.</p>
+      ${al.length ? `<div class="defile"><table class="tableau"><thead><tr><th>Date</th><th>Salarié</th><th>Prévu</th><th>État</th><th>Réponse</th><th></th></tr></thead><tbody>
+      ${al.map(a => `<tr><td>${esc(dateCourte(a.jour))}</td><td>${esc(nom(a.salarie_id))}</td><td>${esc(a.type === 'retard' ? 'arrivée attendue ' + a.prevu : a.prevu || '')}</td><td>${etat(a)}</td>
+        <td>${esc(a.reponse || '')}${docs.filter(x => x.alerte_id === a.id).map(x => `<br><a href="#" data-doc="${esc(x.chemin)}">${esc(x.nom)}</a>`).join('')}</td>
+        <td>${!a.annulee ? `<div class="ligne"><button class="bouton danger petit" data-al="annuler" data-a="${a.id}">Annuler</button>${a.a_reexaminer ? `<button class="bouton petit" data-al="maintenir" data-a="${a.id}">Maintenir</button>` : ''}</div>` : ''}</td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="vide">Aucune alerte.</div>'}</div>`;
+    $('#calc').onclick = async () => { try { const r = await sb.rpc('analyser_alertes', { p_etab: etabId }); toast(`Calcul fait : ${r.creees || 0} nouvelle(s), ${r.annulees || 0} annulée(s), ${r.retablies || 0} rétablie(s).`); afficher(); compteurs(); } catch (e) { toast(messageErreur(e)); } };
+    document.querySelectorAll('[data-doc]').forEach(l => l.onclick = async e => { e.preventDefault(); try { window.open(await sb.lienTemporaire(l.dataset.doc, 300), '_blank', 'noopener'); } catch (er) { toast(messageErreur(er)); } });
+    document.querySelectorAll('[data-al]').forEach(b => b.onclick = async () => {
+      const v = await formulaire(b.dataset.al === 'annuler' ? 'Annuler cette alerte' : 'Maintenir cette alerte', [{ id: 'motif', label: 'Motif (obligatoire)', requis: true }], 'Valider');
+      if (!v) return;
+      try { await sb.rpc('decider_alerte', { p_alerte: b.dataset.a, p_decision: b.dataset.al, p_motif: v.motif }); toast('Décision enregistrée.'); afficher(); compteurs(); } catch (e) { toast(messageErreur(e)); }
+    });
+  }
+
+  // ================= Équipe : fiches, comptes, codes de pointage, départs
   async function vueEquipe() {
     const sal = await sb.lire('salaries', { select: '*', etab_id: 'eq.' + etabId, order: 'actif.desc,prenom' });
     const mem = await sb.lire('membres', { select: 'salarie_id,actif,role', etab_id: 'eq.' + etabId });
     const compte = s => { const m = mem.find(x => x.salarie_id === s.id); return !m ? 'aucun compte' : m.actif ? 'compte actif ou invité' : 'compte désactivé'; };
-    $('#vue').innerHTML = `<form class="carte pile" id="ns"><h2>Ajouter un salarié</h2><div class="grille2">
-        <label class="champ">Prénom<input type="text" id="pr" required></label><label class="champ">Nom<input type="text" id="no"></label>
-        <label class="champ">E-mail<input type="email" id="em"></label><label class="champ">Téléphone<input type="tel" id="te"></label>
-        <label class="champ">Poste<input type="text" id="po"></label><label class="champ">Contrat (h/semaine)<input type="number" id="co" min="1" max="48" step="0.5"></label></div>
-        <button class="bouton" type="submit">Ajouter</button></form>
+    $('#vue').innerHTML = `<div class="ligne"><button class="bouton" id="nouveau">Ajouter un salarié</button></div>
       <div class="carte"><h2>Équipe</h2><div class="defile"><table class="tableau"><thead><tr><th>Salarié</th><th>Accès</th><th>Actions</th></tr></thead><tbody>
       ${sal.map(s => `<tr><td><b>${esc(s.prenom)} ${esc(s.nom)}</b><br><span class="doux petit">${esc(s.poste || '')}${s.contrat_heures ? ' · ' + esc(s.contrat_heures) + ' h' : ''}<br>${esc(s.email || 'sans e-mail')}</span>
         ${s.actif ? '' : '<br><span class="etiquette">parti le ' + esc(s.depart_le || '') + '</span>'}</td>
         <td><span class="etiquette">${compte(s)}</span></td>
         <td><div class="ligne">${s.actif ? `
+          <button class="bouton discret petit" data-a="fiche" data-s="${s.id}">Fiche</button>
           <button class="bouton second petit" data-a="inviter" data-s="${s.id}">Inviter par e-mail</button>
           <button class="bouton discret petit" data-a="lien_invitation" data-s="${s.id}">Lien d'activation</button>
           <button class="bouton discret petit" data-a="lien_mot_de_passe" data-s="${s.id}">Lien mot de passe</button>
@@ -115,27 +282,38 @@
           <button class="bouton danger petit" data-a="desactiver" data-s="${s.id}">Départ</button>` :
           `<button class="bouton second petit" data-a="reactiver" data-s="${s.id}">Réactiver</button>`}</div></td></tr>`).join('')}
       </tbody></table></div><div id="lien" class="message info cache" style="margin-top:12px;word-break:break-all"></div></div>`;
-    $('#ns').onsubmit = async e => {
-      e.preventDefault();
-      try { await sb.ajouter('salaries', { etab_id: etabId, prenom: $('#pr').value.trim(), nom: $('#no').value.trim(), email: $('#em').value.trim() || null,
-        telephone: $('#te').value.trim() || null, poste: $('#po').value.trim() || null, contrat_heures: $('#co').value ? Number($('#co').value) : null });
-        toast('Salarié ajouté.'); afficher(); } catch (x) { toast(messageErreur(x)); }
+    const champsFiche = s => [
+      { id: 'prenom', label: 'Prénom', valeur: s ? s.prenom : '', requis: true }, { id: 'nom', label: 'Nom', valeur: s ? s.nom : '' },
+      { id: 'email', label: 'E-mail', type: 'email', valeur: s ? s.email || '' : '' }, { id: 'telephone', label: 'Téléphone', type: 'tel', valeur: s ? s.telephone || '' : '' },
+      { id: 'poste', label: 'Poste', valeur: s ? s.poste || '' : '' }, { id: 'contrat', label: 'Contrat (heures par semaine)', type: 'number', valeur: s ? s.contrat_heures || '' : '', attr: 'min="1" max="48" step="0.5"' },
+      { id: 'dispo', label: 'Disponibilités (pour le planning)', type: 'textarea', valeur: s ? s.disponibilites : '' }];
+    const ligneFiche = v => ({ prenom: v.prenom, nom: v.nom, email: v.email || null, telephone: v.telephone || null, poste: v.poste || null, contrat_heures: v.contrat ? Number(v.contrat) : null, disponibilites: v.dispo });
+    $('#nouveau').onclick = async () => {
+      const v = await formulaire('Ajouter un salarié', champsFiche(null), 'Ajouter'); if (!v) return;
+      try { await sb.ajouter('salaries', { etab_id: etabId, ...ligneFiche(v) }); toast('Salarié ajouté.'); afficher(); } catch (x) { toast(messageErreur(x)); }
     };
     document.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => {
-      const a = b.dataset.a, id = b.dataset.s; b.disabled = true;
+      const a = b.dataset.a, id = b.dataset.s, s = sal.find(x => x.id === id);
       try {
-        if (a === 'code') {
-          const c = prompt('Nouveau code de pointage (4 à 6 chiffres, pas trop simple) :'); if (!c) return;
-          await sb.rpc('definir_code_pointage', { p_salarie: id, p_code: c.trim() }); toast('Code enregistré. Communiquez-le au salarié en main propre.');
+        if (a === 'fiche') {
+          const v = await formulaire('Fiche de ' + s.prenom, champsFiche(s), 'Enregistrer'); if (!v) return;
+          await sb.modifier('salaries', { id: 'eq.' + id }, { ...ligneFiche(v), maj_le: new Date().toISOString() }); toast('Fiche enregistrée.'); afficher();
+        } else if (a === 'code') {
+          const v = await formulaire('Code de pointage de ' + s.prenom, [{ id: 'code', label: 'Nouveau code (4 à 6 chiffres)', type: 'text', requis: true, attr: 'inputmode="numeric" pattern="[0-9]{4,6}" autocomplete="off"' }], 'Enregistrer',
+            'Le code n’est jamais affiché ensuite : communiquez-le au salarié en main propre. Les codes trop simples ou déjà utilisés sont refusés.');
+          if (!v) return; await sb.rpc('definir_code_pointage', { p_salarie: id, p_code: v.code }); toast('Code enregistré.');
         } else if (a === 'desactiver' || a === 'reactiver') {
-          const motif = demanderMotif(a === 'desactiver' ? 'Motif du départ (obligatoire) :' : 'Motif de la réactivation (obligatoire) :'); if (!motif) return toast('Motif obligatoire.');
-          await sb.fonction('comptes', { action: a, salarie_id: id, motif }); toast(a === 'desactiver' ? 'Accès coupés, historique conservé.' : 'Accès rétablis.'); afficher();
+          const v = await formulaire(a === 'desactiver' ? 'Départ de ' + s.prenom : 'Réactiver ' + s.prenom,
+            [...(a === 'desactiver' ? [{ id: 'date', label: 'Date de départ', type: 'date', valeur: aujourdhui(), requis: true }] : []), { id: 'motif', label: 'Motif (obligatoire)', requis: true }], 'Valider',
+            a === 'desactiver' ? 'Son compte et son code de pointage seront désactivés. Son historique est conservé.' : '');
+          if (!v) return;
+          await sb.fonction('comptes', { action: a, salarie_id: id, motif: v.motif, depart_le: v.date }); toast(a === 'desactiver' ? 'Accès coupés, historique conservé.' : 'Accès rétablis.'); afficher();
         } else {
-          const type = a === 'lien_mot_de_passe' ? 'recovery' : 'invite';
-          const r = await sb.fonction('comptes', { action: a, salarie_id: id, redirect_to: retour(type) });
+          b.disabled = true;
+          const r = await sb.fonction('comptes', { action: a, salarie_id: id, redirect_to: retour() });
           if (a === 'inviter') { toast('Invitation envoyée par e-mail.'); afficher(); }
           else { const l = $('#lien'); l.classList.remove('cache');
-            l.innerHTML = `<b>Lien à remettre au salarié</b> (une seule utilisation, durée limitée) :<br><code>${esc(r.lien)}</code><br><button class="bouton petit" id="copier">Copier</button>`;
+            l.innerHTML = `<b>Lien à remettre à ${esc(s.prenom)}</b> (une seule utilisation, durée limitée) :<br><code>${esc(r.lien)}</code><br><button class="bouton petit" id="copier">Copier</button>`;
             $('#copier').onclick = () => navigator.clipboard.writeText(r.lien).then(() => toast('Lien copié.')); }
         }
       } catch (x) { toast(messageErreur(x)); }
@@ -143,20 +321,66 @@
     });
   }
 
-  // ---------- Journal (lecture seule)
+  // ================= Journal (lecture seule)
   async function vueJournal() {
-    const j = await sb.lire('journal', { select: 'le,objet,action,auteur_nom,motif', etab_id: 'eq.' + etabId, order: 'le.desc', limit: '200' });
+    const j = await sb.lire('journal', { select: 'le,objet,action,auteur_nom,motif', etab_id: 'eq.' + etabId, order: 'le.desc', limit: '300' });
     $('#vue').innerHTML = `<div class="carte"><h2>Journal des corrections et des accès</h2><p class="doux petit">Il ne peut être ni modifié ni effacé.</p>
       <div class="defile"><table class="tableau"><thead><tr><th>Date</th><th>Objet</th><th>Action</th><th>Auteur</th><th>Motif</th></tr></thead><tbody>
-      ${j.map(x => `<tr><td>${esc(new Date(x.le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }))}</td><td>${esc(x.objet)}</td><td>${esc(x.action)}</td><td>${esc(x.auteur_nom || '')}</td><td>${esc(x.motif || '')}</td></tr>`).join('')}
+      ${j.map(x => `<tr><td>${esc(new Date(x.le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }))}</td><td>${esc(x.objet)}</td><td>${esc(x.action)}</td><td>${esc(x.auteur_nom || 'automatique')}</td><td>${esc(x.motif || '')}</td></tr>`).join('')}
       </tbody></table></div></div>`;
   }
 
-  async function afficher() {
-    try { if (onglet === 'jour') await vueJour(); else if (onglet === 'equipe') await vueEquipe(); else await vueJournal(); }
-    catch (e) { if (e.statut === 401) return location.replace('index.html?raison=session'); $('#vue').innerHTML = `<div class="message erreur">${esc(messageErreur(e))}</div>`; }
+  // ================= Réglages : identité et règles des alertes
+  async function vueReglages() {
+    const r = etab.reglages || {};
+    $('#vue').innerHTML = `<form class="carte pile" id="fr"><h2>Identité de l'établissement</h2>
+      <div class="grille2"><label class="champ">Nom<input type="text" id="nom" value="${esc(etab.nom)}" required maxlength="120"></label>
+      <label class="champ">Couleur principale<input type="color" id="couleur" value="${esc(r.couleur || CONFIG.couleurParDefaut)}"></label>
+      <label class="champ">Adresse<input type="text" id="adresse" value="${esc(r.adresse || '')}"></label>
+      <label class="champ">Téléphone<input type="tel" id="tel" value="${esc(r.telephone || '')}"></label></div>
+      <label class="champ">Logo (image, réduite automatiquement)<input type="file" id="logoFichier" accept="image/png,image/jpeg,image/webp"></label>
+      ${r.logo ? `<div class="ligne"><img src="${esc(r.logo)}" alt="Logo actuel" style="width:56px;height:56px;border-radius:50%;object-fit:cover"><label class="ligne petit"><input type="checkbox" id="sansLogo"> Retirer le logo</label></div>` : ''}
+      <h2>Retards et absences</h2>
+      <label class="ligne petit"><input type="checkbox" id="nAbs" ${r.notifier_absences === false ? '' : 'checked'}> Signaler les absences</label>
+      <label class="ligne petit"><input type="checkbox" id="nRet" ${r.notifier_retards === false ? '' : 'checked'}> Signaler les retards</label>
+      <div class="grille2"><label class="champ">Tolérance de retard (minutes)<input type="number" id="tol" min="0" max="60" value="${esc(r.tolerance_min ?? 5)}"></label>
+      <label class="champ">Délai de réponse indiqué au salarié (heures)<input type="number" id="delai" min="1" max="168" value="${esc(r.delai_justificatif_h ?? 48)}"></label></div>
+      <label class="champ">Un salarié pointe à un service mais en manque un autre le même jour
+        <select id="parService"><option value="non" ${r.alerte_par_service ? '' : 'selected'}>Aucune alerte s'il y a au moins un pointage dans la journée (comportement des versions précédentes)</option>
+        <option value="oui" ${r.alerte_par_service ? 'selected' : ''}>Une alerte pour chaque service sans entrée pointée</option></select></label>
+      <p class="doux petit" style="margin:0">Ce choix vous appartient ; la valeur initiale reproduit le comportement des versions précédentes.</p>
+      <div id="msg" class="message cache"></div><button class="bouton" type="submit">Enregistrer</button></form>`;
+    $('#fr').onsubmit = async e => {
+      e.preventDefault(); const m = $('#msg');
+      try {
+        const nv = { ...r, couleur: $('#couleur').value, adresse: $('#adresse').value.trim(), telephone: $('#tel').value.trim(),
+          notifier_absences: $('#nAbs').checked, notifier_retards: $('#nRet').checked, tolerance_min: Number($('#tol').value || 5),
+          delai_justificatif_h: Number($('#delai').value || 48), alerte_par_service: $('#parService').value === 'oui' };
+        const f = $('#logoFichier').files[0];
+        if (f) nv.logo = await reduireImage(f, 256);
+        if ($('#sansLogo') && $('#sansLogo').checked) delete nv.logo;
+        const [e2] = await sb.modifier('etablissements', { id: 'eq.' + etabId }, { nom: $('#nom').value.trim(), reglages: nv });
+        etab = e2; majEntete(); m.textContent = 'Réglages enregistrés.'; m.className = 'message ok';
+      } catch (x) { m.textContent = messageErreur(x); m.className = 'message erreur'; }
+    };
   }
-  afficher();
+  function reduireImage(fichier, taille) {
+    return new Promise((ok, ko) => {
+      const img = new Image(); const url = URL.createObjectURL(fichier);
+      img.onload = () => { const c = document.createElement('canvas'); const k = Math.min(1, taille / Math.max(img.width, img.height));
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url); ok(c.toDataURL('image/png')); };
+      img.onerror = () => ko(new Error('Image illisible.')); img.src = url;
+    });
+  }
+
+  async function afficher() {
+    try {
+      const vues = { jour: vueJour, planning: vuePlanning, demandes: vueDemandes, alertes: vueAlertes, equipe: vueEquipe, journal: vueJournal, reglages: vueReglages };
+      await vues[onglet]();
+    } catch (e) { if (e.statut === 401) return location.replace('index.html?raison=session'); $('#vue').innerHTML = `<div class="message erreur">${esc(messageErreur(e))}</div>`; }
+  }
+  afficher(); compteurs();
 })();
 </script>
 </body>

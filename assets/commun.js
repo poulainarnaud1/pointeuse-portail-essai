@@ -106,6 +106,41 @@
     return { jours, incomplets };
   }
 
+
+  // Petit formulaire dans la page (remplace les fenêtres du navigateur). champs : [{id, label, type, valeur, options, requis, aide}]
+  function formulaire(titre, champs, bouton, texte) {
+    return new Promise(resolve => {
+      const fond = document.createElement('div');
+      fond.className = 'fond-modal';
+      fond.innerHTML = `<form class="carte modal pile" role="dialog" aria-modal="true" aria-label="${esc(titre)}">
+        <h2 style="margin:0">${esc(titre)}</h2>${texte ? `<p class="doux petit" style="margin:0">${esc(texte)}</p>` : ''}
+        ${champs.map(c => c.type === 'select'
+          ? `<label class="champ">${esc(c.label)}<select name="${c.id}">${c.options.map(o => `<option value="${esc(o[0])}" ${o[0] === c.valeur ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select></label>`
+          : c.type === 'textarea'
+          ? `<label class="champ">${esc(c.label)}<textarea name="${c.id}" ${c.requis ? 'required' : ''}>${esc(c.valeur || '')}</textarea></label>`
+          : c.type === 'checkbox'
+          ? `<label class="ligne petit"><input type="checkbox" name="${c.id}" ${c.valeur ? 'checked' : ''}> ${esc(c.label)}</label>`
+          : `<label class="champ">${esc(c.label)}<input type="${c.type || 'text'}" name="${c.id}" value="${esc(c.valeur ?? '')}" ${c.requis ? 'required' : ''} ${c.attr || ''}></label>`).join('')}
+        ${champs.filter(c => c.aide).map(c => `<p class="doux petit" style="margin:0">${esc(c.aide)}</p>`).join('')}
+        <div class="message erreur cache" data-err></div>
+        <div class="ligne"><button class="bouton" type="submit">${esc(bouton || 'Valider')}</button><button class="bouton discret" type="button" data-annuler>Annuler</button></div></form>`;
+      document.body.appendChild(fond);
+      const f = fond.querySelector('form');
+      const fermer = v => { fond.remove(); resolve(v); };
+      fond.querySelector('[data-annuler]').onclick = () => fermer(null);
+      fond.addEventListener('keydown', e => { if (e.key === 'Escape') fermer(null); });
+      f.onsubmit = e => {
+        e.preventDefault();
+        const v = {};
+        for (const c of champs) { const el = f.elements[c.id]; v[c.id] = c.type === 'checkbox' ? el.checked : el.value.trim(); }
+        const manque = champs.find(c => c.requis && !v[c.id]);
+        if (manque) { const m = f.querySelector('[data-err]'); m.textContent = 'Champ obligatoire : ' + manque.label; m.classList.remove('cache'); return; }
+        fermer(v);
+      };
+      const premier = f.querySelector('input,select,textarea'); if (premier) premier.focus();
+    });
+  }
+
   window.P = { $, esc, fmt, jourCivil, heure, dateLongue, dateCourte, ajouterJours, lundi, aujourdhui, hm, duree,
-    messageErreur, toast, bandeauEssai, appliquerIdentite, controleMotDePasse, garde, heuresParJour };
+    messageErreur, toast, bandeauEssai, appliquerIdentite, controleMotDePasse, garde, heuresParJour, formulaire };
 })();
