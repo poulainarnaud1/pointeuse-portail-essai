@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pointeuse — Portail de pointage</title>
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/style.css?v=3">
 <style>
   body { background: #15120f; color: #f4efe8; }
   .borne { min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
@@ -48,9 +48,9 @@
   </div>
   <div class="pied"><span id="ecart">Heure du serveur</span><button id="quitter">Déconnecter la tablette (maintenir 3 s)</button></div>
 </div>
-<script src="assets/config.js"></script>
-<script src="assets/sb.js"></script>
-<script src="assets/commun.js"></script>
+<script src="assets/config.js?v=3"></script>
+<script src="assets/sb.js?v=3"></script>
+<script src="assets/commun.js?v=3"></script>
 <script>
 (async function () {
   const { $, fmt, heure, messageErreur } = P;
