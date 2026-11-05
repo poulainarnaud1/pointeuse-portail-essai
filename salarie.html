@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mon espace — Portail de pointage</title>
-<link rel="stylesheet" href="assets/style.css?v=8">
+<link rel="stylesheet" href="assets/style.css?v=9">
 </head>
 <body>
 <header class="tete">
@@ -23,10 +23,10 @@
 </header>
 <main class="enveloppe"><div class="pile" id="vue"><p class="doux">Chargement…</p></div></main>
 
-<script src="assets/config.js?v=8"></script>
-<script src="assets/sb.js?v=8"></script>
-<script src="assets/commun.js?v=8"></script>
-<script src="assets/releve.js?v=8"></script>
+<script src="assets/config.js?v=9"></script>
+<script src="assets/sb.js?v=9"></script>
+<script src="assets/commun.js?v=9"></script>
+<script src="assets/releve.js?v=9"></script>
 <script>
 (async function () {
   const { $, esc, heure, dateLongue, dateCourte, ajouterJours, lundi, aujourdhui, hm, duree, messageErreur, toast } = P;
@@ -148,9 +148,9 @@
 
   // ---------- Notifications (retards, absences) : réponse et justificatif
   async function vueNotifs() {
-    const al = await sb.lire('alertes', { select: '*', salarie_id: 'eq.' + moiId, order: 'cree_le.desc', limit: '100' });
+    const al = await sb.lire('alertes', { select: '*', salarie_id: 'eq.' + moiId, order: 'cree_le.desc' });
     const docs = await sb.lire('documents', { select: 'id,alerte_id,nom,chemin,cree_le', salarie_id: 'eq.' + moiId });
-    const msgs = await sb.lire('messages', { select: '*', etab_id: 'eq.' + etabId, order: 'cree_le.desc', limit: '100' });
+    const msgs = await sb.lire('messages', { select: '*', etab_id: 'eq.' + etabId, order: 'cree_le.desc' });
     const lus = await sb.lire('messages_lus', { select: 'message_id', salarie_id: 'eq.' + moiId });
     if (!al.length && !msgs.length) { $('#vue').innerHTML = '<div class="vide">Aucune notification pour le moment. Les messages de la direction et les réponses à vos demandes apparaîtront ici.</div>'; return; }
     const elems = [...al.map(a => ({ t: 'a', le: a.cree_le, a })), ...msgs.map(m => ({ t: 'm', le: m.cree_le, m }))].sort((x, y) => y.le.localeCompare(x.le));
@@ -201,7 +201,7 @@
 
   // ---------- Demandes de congé et d'absence
   async function vueDemandes() {
-    const ds = await sb.lire('demandes', { select: '*', salarie_id: 'eq.' + moiId, order: 'cree_le.desc', limit: '100' });
+    const ds = await sb.lire('demandes', { select: '*', salarie_id: 'eq.' + moiId, order: 'cree_le.desc' });
     const lib = { attente: '<span class="etiquette alerte">en attente</span>', acceptee: '<span class="etiquette bon">acceptée</span>', refusee: '<span class="etiquette mauvais">refusée</span>', annulee: '<span class="etiquette">annulée</span>' };
     $('#vue').innerHTML = `<form class="carte pile" id="nd"><h2>Nouvelle demande</h2>
       <div class="grille2">

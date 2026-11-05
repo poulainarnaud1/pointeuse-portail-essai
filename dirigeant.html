@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Espace dirigeant — Portail de pointage</title>
-<link rel="stylesheet" href="assets/style.css?v=8">
+<link rel="stylesheet" href="assets/style.css?v=9">
 </head>
 <body>
 <header class="tete">
@@ -28,10 +28,10 @@
 </header>
 <main class="enveloppe"><div class="pile" id="vue"><p class="doux">Chargement…</p></div></main>
 
-<script src="assets/config.js?v=8"></script>
-<script src="assets/sb.js?v=8"></script>
-<script src="assets/commun.js?v=8"></script>
-<script src="assets/releve.js?v=8"></script>
+<script src="assets/config.js?v=9"></script>
+<script src="assets/sb.js?v=9"></script>
+<script src="assets/commun.js?v=9"></script>
+<script src="assets/releve.js?v=9"></script>
 <script>
 (async function () {
   const { $, esc, heure, dateCourte, dateLongue, ajouterJours, lundi, aujourdhui, hm, duree, messageErreur, toast, formulaire, fenetre } = P;
@@ -83,12 +83,12 @@
   async function chargerPeriode(du, au, avecJournal) {
     const [sal, pts, cr, dem] = await Promise.all([
       sb.lire('salaries', { select: '*', etab_id: 'eq.' + etabId, order: 'prenom' }),
-      sb.lire('pointages', { select: '*', etab_id: 'eq.' + etabId, and: `(jour.gte.${ajouterJours(du, -1)},jour.lte.${ajouterJours(au, 1)})`, order: 'horodatage', limit: '20000' }),
+      sb.lire('pointages', { select: '*', etab_id: 'eq.' + etabId, and: `(jour.gte.${ajouterJours(du, -1)},jour.lte.${ajouterJours(au, 1)})`, order: 'horodatage' }),
       sb.lire('creneaux', { select: '*', etab_id: 'eq.' + etabId, supprime: 'eq.false', and: `(jour.gte.${ajouterJours(du, -1)},jour.lte.${ajouterJours(au, 1)})` }),
       sb.lire('demandes', { select: '*', etab_id: 'eq.' + etabId, statut: 'eq.acceptee', du: 'lte.' + au, au: 'gte.' + du })]);
     const corriges = new Map(), motifs = {}, journal = [];
     if (avecJournal) {
-      const j = await sb.lire('journal', { select: '*', etab_id: 'eq.' + etabId, objet: 'eq.pointage', le: 'gte.' + ajouterJours(du, -1), order: 'le', limit: '20000' });
+      const j = await sb.lire('journal', { select: '*', etab_id: 'eq.' + etabId, objet: 'eq.pointage', le: 'gte.' + ajouterJours(du, -1), order: 'le' });
       for (const e of j) {
         if (e.action === 'correction' && e.anciennes && !corriges.has(e.objet_id)) corriges.set(e.objet_id, Date.parse(e.anciennes.horodatage));
         if (['correction', 'suppression', 'ajout_manuel'].includes(e.action) && e.motif) motifs[e.objet_id] = e.motif;
@@ -468,7 +468,7 @@
   // ================= Congés et demandes (v16 : filtres, contexte de la décision, retrait des créneaux, réouverture)
   async function vueDemandes() {
     const sal = await sb.lire('salaries', { select: 'id,prenom,nom', etab_id: 'eq.' + etabId });
-    const ds = await sb.lire('demandes', { select: '*', etab_id: 'eq.' + etabId, order: 'cree_le.desc', limit: '500' });
+    const ds = await sb.lire('demandes', { select: '*', etab_id: 'eq.' + etabId, order: 'cree_le.desc' });
     const docs = await sb.lire('documents', { select: 'demande_id,nom,chemin', etab_id: 'eq.' + etabId, demande_id: 'not.is.null' });
     const lab = { attente: 'À valider', acceptee: 'Validées', refusee: 'Refusées', annulee: 'Annulées', toutes: 'Toutes' };
     const etiq = { attente: '<span class="etiquette alerte">En attente</span>', acceptee: '<span class="etiquette bon">Acceptée</span>', refusee: '<span class="etiquette mauvais">Refusée</span>', annulee: '<span class="etiquette">Annulée par le salarié</span>' };
@@ -509,7 +509,7 @@
   const DECISIONS = { justifiee: '<span class="etiquette bon">Justifié</span>', injustifiee: '<span class="etiquette mauvais">Non justifié</span>', prevenu: '<span class="etiquette bon">Prévenu</span>' };
   async function vueAlertes() {
     const sal = await sb.lire('salaries', { select: 'id,prenom,nom,actif', etab_id: 'eq.' + etabId, order: 'prenom' });
-    const al = await sb.lire('alertes', { select: '*', etab_id: 'eq.' + etabId, order: 'jour.desc,cree_le.desc', limit: '500' });
+    const al = await sb.lire('alertes', { select: '*', etab_id: 'eq.' + etabId, order: 'jour.desc,cree_le.desc' });
     const docs = await sb.lire('documents', { select: 'alerte_id,nom,chemin', etab_id: 'eq.' + etabId, alerte_id: 'not.is.null' });
     const enAtt = await sb.lire('demandes', { select: '*', etab_id: 'eq.' + etabId, statut: 'eq.attente' });
     const lab = { traiter: 'À traiter', absences: 'Absences', retards: 'Retards', toutes: 'Tout' };
@@ -558,7 +558,7 @@
   // ================= Messages de la direction (v16 : catégories, destinataires, période, lu par… ; aucun e-mail ni SMS)
   async function vueMessages() {
     const sal = await sb.lire('salaries', { select: 'id,prenom,nom,poste', etab_id: 'eq.' + etabId, actif: 'eq.true', order: 'prenom' });
-    const msgs = await sb.lire('messages', { select: '*', etab_id: 'eq.' + etabId, supprime: 'eq.false', order: 'cree_le.desc', limit: '200' });
+    const msgs = await sb.lire('messages', { select: '*', etab_id: 'eq.' + etabId, supprime: 'eq.false', order: 'cree_le.desc' });
     const lus = msgs.length ? await sb.lire('messages_lus', { select: 'message_id,salarie_id', message_id: `in.(${msgs.map(m => m.id).join(',')})` }) : [];
     const postes = [...new Set(sal.map(s => s.poste).filter(Boolean))];
     const CATS = ['Information', 'Organisation', 'Planning', 'Fermeture', 'Sécurité', 'Autre'];
@@ -673,7 +673,7 @@
   // ================= Journal (lecture seule)
   async function vueJournal() {
     const j = await sb.lire('journal', { select: 'le,objet,action,auteur_nom,motif', etab_id: 'eq.' + etabId, order: 'le.desc', limit: '500' });
-    $('#vue').innerHTML = `<div class="carte"><h2>Journal des corrections et des accès</h2><p class="doux petit">Il ne peut être ni modifié ni effacé, même par l'administrateur de la base sans retirer la protection.</p>
+    $('#vue').innerHTML = `<div class="carte"><h2>Journal des corrections et des accès</h2><p class="doux petit">Il ne peut être ni modifié ni effacé, même par l'administrateur de la base sans retirer la protection.${j.length >= 500 ? ' <b>Seules les 500 entrées les plus récentes sont affichées ici</b> ; l’historique complet d’une période se trouve dans Pointages &gt; Journal et historique.' : ''}</p>
       <div class="defile"><table class="tableau"><thead><tr><th>Date</th><th>Objet</th><th>Action</th><th>Auteur</th><th>Motif</th></tr></thead><tbody>
       ${j.map(x => `<tr><td class="nw">${esc(new Date(x.le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }))}</td><td>${esc(x.objet)}</td><td>${esc(ACTIONS[x.action] || x.action)}</td><td>${esc(x.auteur_nom || 'automatique')}</td><td>${esc(x.motif || '')}</td></tr>`).join('')}
       </tbody></table></div></div>`;

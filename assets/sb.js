@@ -32,6 +32,29 @@
     return d;
   }
 
+  async function brut(chemin, options) {
+    try { return await fetch(C.urlProjet + chemin, options); }
+    catch (e) { throw new ErreurSb(0, 'reseau', 'Connexion impossible : vérifiez le réseau.'); }
+  }
+  // Rétablit l'ordre demandé à PostgREST (« col.asc,col2.desc.nullslast ») sur des lignes lues par clé.
+  // Dates et heures ISO : ordre des caractères (identique à la base) ; textes : ordre alphabétique français.
+  function trier(lignes, ordre) {
+    const regles = String(ordre || '').split(',').filter(Boolean).map(o => { const [c, ...m] = o.split('.'); const desc = m.includes('desc');
+      return { c, desc, nullsPremiers: m.includes('nullsfirst') || (desc && !m.includes('nullslast')) }; });
+    if (!regles.length) return lignes;
+    const iso = v => typeof v === 'string' && /^\d{4}-\d\d-\d\d|^\d\d:\d\d/.test(v);
+    const cmp = (a, b) => typeof a === 'number' && typeof b === 'number' ? a - b : iso(a) && iso(b) ? (a < b ? -1 : a > b ? 1 : 0)
+      : typeof a === 'boolean' ? (a === b ? 0 : a ? 1 : -1) : String(a).localeCompare(String(b), 'fr');
+    return lignes.sort((x, y) => {
+      for (const r of regles) {
+        const a = x[r.c], b = y[r.c];
+        if (a == null || b == null) { if (a == null && b == null) continue; return (a == null) === r.nullsPremiers ? -1 : 1; }
+        const d = cmp(a, b); if (d) return r.desc ? -d : d;
+      }
+      return 0;
+    });
+  }
+
   async function appel(chemin, options = {}) {
     let r;
     try { r = await fetch(C.urlProjet + chemin, options); }
@@ -58,6 +81,10 @@
     if (!t) throw new ErreurSb(401, 'non_connecte', 'Session expirée : reconnectez-vous.');
     return { ...H, Authorization: 'Bearer ' + t, ...(extra || {}) };
   }
+
+  // Lecture par pages : taille demandée par page, et clé de tri qui départage les égalités pour chaque table.
+  const PAGE = 1000;
+  const CLES_TRI = { messages_lus: 'message_id,salarie_id', semaines: 'etab_id,lundi', codes_pointage: 'salarie_id' };
 
   const sb = {
     ErreurSb,
@@ -112,8 +139,50 @@
     },
 
     // Base : lecture (paramètres PostgREST), ajout, modification, appel de fonction.
+    // Lecture COMPLÈTE, par pages. Le serveur renvoie au plus un nombre limité de lignes par réponse (1 000 par défaut
+    // chez Supabase) : demander « limit=20000 » ne garantit rien. Les pages sont lues « par clé » (identifiant
+    // immuable : id > dernier id lu), si bien qu'un pointage ajouté ou corrigé pendant la lecture ne décale pas les
+    // pages. À la fin, les lignes sont recomptées (sans doublon) et comparées au total compté par le serveur :
+    // en cas d'écart, la lecture est refaite (3 essais), puis refusée (erreur « lecture_incomplete ») plutôt que de
+    // présenter un relevé ou un export tronqué comme complet. L'ordre demandé (« order ») est rétabli ensuite.
+    // Avec un paramètre « limit », la lecture est volontairement partielle (ex. les 500 dernières entrées).
     async lire(table, params) {
-      return appel('/rest/v1/' + table + '?' + new URLSearchParams(params || {}).toString(), { headers: await entetes() });
+      const p = { ...(params || {}) };
+      if (p.limit) return appel('/rest/v1/' + table + '?' + new URLSearchParams(p).toString(), { headers: await entetes() });
+      const ordre = p.order || ''; delete p.order;
+      const cle = CLES_TRI[table];                                   // tables sans identifiant unique « id »
+      if (!cle && p.select && p.select !== '*' && !p.select.split(',').includes('id')) p.select += ',id';
+      const compter = async () => {
+        const r = await brut('/rest/v1/' + table + '?' + new URLSearchParams({ ...p, select: cle ? cle.split(',')[0] : 'id' }).toString(),
+          { method: 'HEAD', headers: await entetes({ Prefer: 'count=exact', 'Range-Unit': 'items', Range: '0-0' }) });
+        const t = Number((r.headers.get('Content-Range') || '').split('/')[1]);
+        if (!r.ok && r.status !== 416) throw new ErreurSb(r.status, 'lecture', 'Lecture impossible (' + table + ').');
+        if (!Number.isFinite(t)) throw new ErreurSb(0, 'lecture_incomplete', 'Le serveur n’a pas indiqué le nombre de lignes (' + table + ') : lecture refusée.');
+        return t;
+      };
+      const ident = x => cle ? cle.split(',').map(c => x[c]).join('|') : x.id;
+      for (let essai = 1; essai <= 3; essai++) {
+        const avant = await compter();
+        const lignes = []; let dernier = null;
+        for (let n = 0; n < 100000; n++) {
+          const q = new URLSearchParams(p);
+          if (cle) q.set('order', cle);                               // petites tables : par décalage, sur une clé stable
+          else { q.set('order', 'id'); if (dernier !== null) q.append('id', 'gt.' + dernier); }
+          const debut = cle ? lignes.length : 0;
+          const r = await brut('/rest/v1/' + table + '?' + q.toString(), { headers: await entetes({ 'Range-Unit': 'items', Range: debut + '-' + (debut + PAGE - 1) }) });
+          if (r.status === 416) break;
+          const page = await lire(r);
+          if (!Array.isArray(page)) throw new ErreurSb(0, 'lecture_incomplete', 'Réponse inattendue du serveur (' + table + ').');
+          if (!page.length) break;
+          lignes.push(...page);
+          if (!cle) dernier = page[page.length - 1].id;
+        }
+        const uniques = new Set(lignes.map(ident)).size;
+        const apres = await compter();
+        if (uniques === lignes.length && lignes.length === apres && apres === avant) return trier(lignes, ordre);
+        // des lignes ont été ajoutées ou retirées pendant la lecture : on relit tout
+      }
+      throw new ErreurSb(0, 'lecture_incomplete', 'Lecture incomplète des données (' + table + ') : les totaux et exports ne sont pas affichés. Réessayez dans un instant.');
     },
     async ajouter(table, ligne) {
       return appel('/rest/v1/' + table, { method: 'POST', headers: await entetes({ 'Content-Type': 'application/json', Prefer: 'return=representation' }), body: JSON.stringify(ligne) });

@@ -14,12 +14,20 @@
   const hm = ts => { const p = parts(ts); return p.hour + ':' + p.minute; };
   const hms = ts => { const p = parts(ts); return p.hour + ':' + p.minute + ':' + p.second; };
   const jourDe = ts => { const p = parts(ts); return `${p.year}-${p.month}-${p.day}`; };
-  // Instant exact d'une heure de Paris un jour donné (gère les jours de 23 h et 25 h), comme atLocal de la v16.
+  // Instant exact d'une heure de Paris un jour donné (jours de 23 h et de 25 h compris).
+  // Même règle que la base (PostgreSQL : (jour + heure) at time zone 'Europe/Paris'), pour que l'écran et le serveur
+  // calculent les mêmes retards et les mêmes heures prévues :
+  //  - heure existante une seule fois : cet instant ;
+  //  - heure ambiguë (passage à l'heure d'hiver, 02:00–02:59 deux fois) : la seconde, en heure d'hiver ;
+  //  - heure inexistante (passage à l'heure d'été, 02:00–02:59) : lue en heure d'hiver, soit 03:00–03:59 heure d'été.
+  const decalage = ts => { const p = parts(ts); return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ts / 1000) * 1000; };
   function instant(k, hhmm) {
     const [h, m] = String(hhmm || '0:0').split(':').map(Number);
-    const supp = Date.UTC(+k.slice(0, 4), +k.slice(5, 7) - 1, +k.slice(8, 10), h, m || 0);
-    const p = parts(supp); const vu = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute);
-    return supp - (vu - supp);
+    const mur = Date.UTC(+k.slice(0, 4), +k.slice(5, 7) - 1, +k.slice(8, 10), h, m || 0);
+    // décalages en vigueur autour de ce jour (+1 h et +2 h à Paris), du plus petit au plus grand
+    const decs = [...new Set([decalage(mur - 86400e3), decalage(mur), decalage(mur + 86400e3)])].sort((a, b) => a - b);
+    for (const d of decs) { const c = mur - d; if (decalage(c) === d) return c; }   // plus petit décalage valable = heure d'hiver
+    return mur - decs[0];                                                           // heure inexistante : lue en heure d'hiver
   }
   const fmtH = min => { min = Math.round(min); const s = min < 0 ? '−' : ''; min = Math.abs(min); return s + Math.floor(min / 60) + 'h' + pad(min % 60); };
   const heuresDec = min => (min / 60).toFixed(2).replace('.', ',');
