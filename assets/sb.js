@@ -129,13 +129,14 @@
     },
 
     // Fichiers privés : dépôt et lien de lecture temporaire (quelques minutes).
-    async deposer(chemin, fichier) {
-      return appel('/storage/v1/object/' + C.dossierJustificatifs + '/' + chemin, {
+    // Espace « justificatifs » par défaut ; « photos » pour les photos de pointage.
+    async deposer(chemin, fichier, espace) {
+      return appel('/storage/v1/object/' + (espace || C.dossierJustificatifs) + '/' + chemin, {
         method: 'POST', headers: await entetes({ 'Content-Type': fichier.type || 'application/octet-stream', 'x-upsert': 'false' }), body: fichier
       });
     },
-    async lienTemporaire(chemin, secondes) {
-      const d = await appel('/storage/v1/object/sign/' + C.dossierJustificatifs + '/' + chemin, {
+    async lienTemporaire(chemin, secondes, espace) {
+      const d = await appel('/storage/v1/object/sign/' + (espace || C.dossierJustificatifs) + '/' + chemin, {
         method: 'POST', headers: await entetes({ 'Content-Type': 'application/json' }), body: JSON.stringify({ expiresIn: secondes || 300 })
       });
       return C.urlProjet + '/storage/v1' + d.signedURL;

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Espace dirigeant — Portail de pointage</title>
-<link rel="stylesheet" href="assets/style.css?v=7">
+<link rel="stylesheet" href="assets/style.css?v=8">
 </head>
 <body>
 <header class="tete">
@@ -28,10 +28,10 @@
 </header>
 <main class="enveloppe"><div class="pile" id="vue"><p class="doux">Chargement…</p></div></main>
 
-<script src="assets/config.js?v=7"></script>
-<script src="assets/sb.js?v=7"></script>
-<script src="assets/commun.js?v=7"></script>
-<script src="assets/releve.js?v=7"></script>
+<script src="assets/config.js?v=8"></script>
+<script src="assets/sb.js?v=8"></script>
+<script src="assets/commun.js?v=8"></script>
+<script src="assets/releve.js?v=8"></script>
 <script>
 (async function () {
   const { $, esc, heure, dateCourte, dateLongue, ajouterJours, lundi, aujourdhui, hm, duree, messageErreur, toast, formulaire, fenetre } = P;
@@ -218,7 +218,10 @@
     };
   }
   async function rechargerEtab() { const [e] = await sb.lire('etablissements', { select: '*', id: 'eq.' + etabId }); if (e) etab = e; }
-  const ACTIONS = { creation: 'Pointage (tablette)', correction: 'Correction', suppression: 'Suppression', ajout_manuel: 'Ajout manuel', rétablissement: 'Rétablissement', reprise_v8: 'Reprise v8 (état initial)' };
+  const ACTIONS = { creation: 'Pointage (tablette)', correction: 'Correction', suppression: 'Suppression', ajout_manuel: 'Ajout manuel', rétablissement: 'Rétablissement', reprise_v8: 'Reprise v8 (état initial)',
+    chargement: 'Exemple chargé', retrait: 'Exemples retirés', definition: 'Code défini',
+    absence_justifiee: 'Absence justifiée', absence_injustifiee: 'Absence non justifiée', absence_prevenu: 'Absence : avait prévenu',
+    retard_justifiee: 'Retard justifié', retard_injustifiee: 'Retard non justifié', retard_prevenu: 'Retard : avait prévenu' };
   function tableJournal(liste, d) {
     if (!liste.length) return '<p class="doux petit" style="margin:0">Aucune correction enregistrée sur cette période.</p>';
     const f = x => x ? `${x.sens === 'entree' ? 'Entrée' : 'Sortie'} ${x.horodatage ? esc(heure(x.horodatage)) : ''}${x.supprime ? ' (supprimé)' : ''}` : '—';
@@ -228,6 +231,8 @@
         <td class="nw">${f(e.anciennes)}</td><td class="nw">${f(e.nouvelles)}</td><td>${esc(e.motif || '')}</td></tr>`; }).join('')}</tbody></table></div>`;
   }
   // Fenêtre « Corriger » d'une journée : heures modifiables, suppression motivée, rétablissement, ajout d'un pointage oublié.
+  // Photo prise au pointage (si le dirigeant l'a activée) : lien de lecture valable 2 minutes ; effacée après la durée de conservation.
+  const photoP = p => !p.photo_chemin ? '' : p.photo_purgee_le ? '<span class="etiquette">photo effacée (conservation)</span>' : `<button class="bouton discret petit" data-photo="${esc(p.photo_chemin)}">Photo</button>`;
   async function fenetreJour(sid, k, sal) {
     const s = sal.find(x => x.id === sid);
     const pts = await sb.lire('pointages', { select: '*', salarie_id: 'eq.' + sid, jour: 'eq.' + k, order: 'horodatage' });
@@ -235,7 +240,7 @@
     const f = fenetre(`<div class="ligne entre"><h2 style="margin:0">${esc(nomS(s))}</h2><button class="bouton discret petit" data-fermer>Fermer</button></div>
       <p class="doux" style="margin:0;text-transform:capitalize">Pointages du ${esc(dateLongue(k))}</p>
       ${pts.length ? pts.map(p => p.supprime ? `<div class="ligne entre" style="opacity:.7"><span><span class="etiquette">${p.sens === 'entree' ? 'Entrée' : 'Sortie'}</span> <s class="num">${esc(heure(p.horodatage))}</s> <span class="etiquette mauvais">supprimé</span></span><button class="bouton discret petit" data-retablir="${p.id}">Rétablir</button></div>`
-        : `<div class="ligne entre"><span class="ligne"><span class="etiquette ${p.sens === 'entree' ? 'bon' : 'alerte'}">${p.sens === 'entree' ? 'Entrée' : 'Sortie'}</span><input type="time" value="${esc(heure(p.horodatage))}" data-h="${p.id}" style="width:auto" aria-label="Heure">${p.source === 'dirigeant' || hist.some(e => e.objet_id === p.id && e.action === 'correction') ? '<span class="etiquette">corrigé</span>' : ''}</span>
+        : `<div class="ligne entre"><span class="ligne"><span class="etiquette ${p.sens === 'entree' ? 'bon' : 'alerte'}">${p.sens === 'entree' ? 'Entrée' : 'Sortie'}</span><input type="time" value="${esc(heure(p.horodatage))}" data-h="${p.id}" style="width:auto" aria-label="Heure">${p.source === 'dirigeant' || hist.some(e => e.objet_id === p.id && e.action === 'correction') ? '<span class="etiquette">corrigé</span>' : ''}${photoP(p)}</span>
           <button class="bouton danger petit" data-suppr="${p.id}">Supprimer</button></div>`).join('') : '<p class="doux">Aucun pointage ce jour.</p>'}
       <label class="champ">Motif de la correction (obligatoire)<input type="text" id="motifJ" placeholder="Ex. oubli de badge, heure confirmée par le responsable"></label>
       ${pts.some(p => !p.supprime) ? '<button class="bouton second" id="enrH">Enregistrer les heures modifiées</button>' : ''}
@@ -243,6 +248,7 @@
       <div class="grille2"><label class="champ">Type<select id="tA"><option value="entree">Entrée</option><option value="sortie">Sortie</option></select></label><label class="champ">Heure<input type="time" id="hA"></label></div>
       <button class="bouton" id="ajA">Ajouter</button>
       ${hist.length ? `<details><summary class="petit">Historique de ce jour (${hist.length})</summary>${tableJournal(hist.filter(e => e.action !== 'creation'), { sal })}</details>` : ''}`, true);
+    f.el.querySelectorAll('[data-photo]').forEach(b => b.onclick = async () => { try { window.open(await sb.lienTemporaire(b.dataset.photo, 120, 'photos'), '_blank', 'noopener'); } catch (e) { toast(messageErreur(e)); } });
     const motif = () => { const m = f.el.querySelector('#motifJ').value.trim(); if (m.length < 3) { toast('Indiquez le motif de la correction.'); return null; } return m; };
     const fini = async () => { f.fermer(); await afficher(); };
     f.el.querySelectorAll('[data-suppr]').forEach(b => b.onclick = async () => { const m = motif(); if (!m) return; try { await sb.rpc('corriger_pointage', { p_id: b.dataset.suppr, p_horodatage: null, p_sens: null, p_supprime: true, p_motif: m }); toast('Pointage supprimé (rétablissable).'); fini(); } catch (e) { toast(messageErreur(e)); } });
@@ -499,6 +505,8 @@
   }
 
   // ================= Retards et absences (v16 : filtres, bilan du mois, justifiée / non justifiée, annuler / maintenir)
+  // Décisions du dirigeant sur un retard ou une absence (arbitrage du 05/11 : « justifié » et « prévenu », retards compris)
+  const DECISIONS = { justifiee: '<span class="etiquette bon">Justifié</span>', injustifiee: '<span class="etiquette mauvais">Non justifié</span>', prevenu: '<span class="etiquette bon">Prévenu</span>' };
   async function vueAlertes() {
     const sal = await sb.lire('salaries', { select: 'id,prenom,nom,actif', etab_id: 'eq.' + etabId, order: 'prenom' });
     const al = await sb.lire('alertes', { select: '*', etab_id: 'eq.' + etabId, order: 'jour.desc,cree_le.desc', limit: '500' });
@@ -509,12 +517,12 @@
     const m0 = aujourdhui().slice(0, 7);
     const mois = sal.map(s => { const mine = al.filter(a => a.salarie_id === s.id && !a.annulee && a.jour.startsWith(m0)); return { s, ret: mine.filter(a => a.type === 'retard'), abs: mine.filter(a => a.type === 'absence') }; }).filter(x => x.ret.length || x.abs.length);
     const etat = a => a.annulee ? `<span class="etiquette">Annulée</span>`
-      : (a.type === 'retard' ? `<span class="etiquette alerte">Retard${a.minutes ? ' · ' + a.minutes + ' min' : ''}</span>${a.reponse ? '<span class="etiquette">Réponse reçue</span>' : ''}`
-        : `<span class="etiquette mauvais">Absence</span>${{ attente: '<span class="etiquette alerte">Justificatif attendu</span>', repondu: '<span class="etiquette">Justificatif ou réponse reçus</span>', justifiee: '<span class="etiquette bon">Justifiée</span>', injustifiee: '<span class="etiquette mauvais">Non justifiée</span>' }[a.statut] || ''}`)
+      : (a.type === 'retard' ? `<span class="etiquette alerte">Retard${a.minutes ? ' · ' + a.minutes + ' min' : ''}</span>${a.reponse ? '<span class="etiquette">Réponse reçue</span>' : ''}${DECISIONS[a.statut] || ''}`
+        : `<span class="etiquette mauvais">Absence</span>${{ attente: '<span class="etiquette alerte">Justificatif attendu</span>', repondu: '<span class="etiquette">Justificatif ou réponse reçus</span>', ...DECISIONS }[a.statut] || ''}`)
       + (a.a_reexaminer && !a.maintenue && !a.annulee ? '<span class="etiquette alerte">À réexaminer</span>' : '');
     $('#vue').innerHTML = `<div class="message info">Les retards et absences sont calculés par le serveur toutes les 10 minutes, seulement pour les semaines publiées et hors congés ou absences validés. Le salarié les voit dans son espace (aucun e-mail ni SMS n'est envoyé). Ils restent des informations : une sanction éventuelle suit la procédure disciplinaire habituelle.</div>
-      ${mois.length ? `<div class="carte"><h2>Ce mois-ci</h2><div class="defile"><table class="tableau"><thead><tr><th>Salarié</th><th>Retards</th><th>Minutes cumulées</th><th>Absences</th><th>Justifiées</th></tr></thead><tbody>
-        ${mois.map(x => `<tr><td>${esc(nomS(x.s))}</td><td>${x.ret.length}</td><td>${x.ret.reduce((m, a) => m + (a.minutes || 0), 0)} min</td><td>${x.abs.length}</td><td>${x.abs.filter(a => a.statut === 'justifiee').length}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+      ${mois.length ? `<div class="carte"><h2>Ce mois-ci</h2><div class="defile"><table class="tableau"><thead><tr><th>Salarié</th><th>Retards</th><th>Minutes cumulées</th><th>Absences</th><th>Justifiés</th><th>Prévenus</th></tr></thead><tbody>
+        ${mois.map(x => `<tr><td>${esc(nomS(x.s))}</td><td>${x.ret.length}</td><td>${x.ret.reduce((m, a) => m + (a.minutes || 0), 0)} min</td><td>${x.abs.length}</td><td>${[...x.ret, ...x.abs].filter(a => a.statut === 'justifiee').length}</td><td>${[...x.ret, ...x.abs].filter(a => a.statut === 'prevenu').length}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
       <div class="ligne">${Object.entries(lab).map(([k, l]) => `<button class="bouton ${filtreAl === k ? '' : 'discret'} petit" data-f="${k}">${l}</button>`).join('')}<span style="flex:1"></span><button class="bouton second petit" id="calc">Recalculer maintenant</button></div>
       ${liste.length ? liste.map(a => { const pl = a.type === 'absence' && !a.annulee ? enAtt.find(r => r.salarie_id === a.salarie_id && TYPES_CONGE.includes(r.type) && r.du <= a.jour && r.au >= a.jour) : null;
         return `<div class="carte pile" style="gap:6px"><div class="ligne entre"><div class="ligne"><b>${esc(nomS(sal.find(s => s.id === a.salarie_id)))}</b>${etat(a)}</div><span class="doux petit">${esc(new Date(a.cree_le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }))}</span></div>
@@ -525,8 +533,9 @@
         ${a.a_reexaminer && !a.maintenue && !a.annulee ? `<span class="petit" style="color:var(--alerte)"><b>À réexaminer :</b> ${esc(a.a_reexaminer.pourquoi || '')}. Le salarié a déjà répondu ou une décision a été prise : rien n'a été annulé automatiquement.</span>` : ''}
         ${pl ? `<span class="petit"><span class="etiquette">Demande en attente</span> ${esc(pl.type)} du ${esc(dateCourte(pl.du))}${pl.au !== pl.du ? ' au ' + esc(dateCourte(pl.au)) : ''} : tant qu'elle n'est pas acceptée, l'absence reste à traiter.</span>` : ''}
         ${!a.annulee ? `<div class="ligne">${a.a_reexaminer && !a.maintenue ? `<button class="bouton petit" data-al="annuler" data-a="${a.id}">Annuler la notification</button><button class="bouton discret petit" data-al="maintenir" data-a="${a.id}">Maintenir</button>` : ''}
-          ${a.type === 'absence' && a.statut !== 'justifiee' ? `<button class="bouton petit" data-abs="justifiee" data-a="${a.id}">Absence justifiée</button>` : ''}
-          ${a.type === 'absence' && a.statut !== 'injustifiee' ? `<button class="bouton danger petit" data-abs="injustifiee" data-a="${a.id}">Non justifiée</button>` : ''}
+          ${a.statut !== 'justifiee' ? `<button class="bouton petit" data-abs="justifiee" data-a="${a.id}">${a.type === 'retard' ? 'Retard justifié' : 'Absence justifiée'}</button>` : ''}
+          ${a.statut !== 'prevenu' ? `<button class="bouton second petit" data-abs="prevenu" data-a="${a.id}">Prévenu</button>` : ''}
+          ${a.statut !== 'injustifiee' ? `<button class="bouton danger petit" data-abs="injustifiee" data-a="${a.id}">Non justifié${a.type === 'absence' ? 'e' : ''}</button>` : ''}
           ${!(a.a_reexaminer && !a.maintenue) ? `<button class="bouton discret petit" data-al="annuler" data-a="${a.id}">Annuler</button>` : ''}</div>` : ''}</div>`; }).join('')
         : `<div class="vide">${filtreAl === 'traiter' ? 'Aucune absence à traiter.' : 'Rien à afficher.'}</div>`}`;
     brancherDocs();
@@ -538,7 +547,9 @@
       try { await sb.rpc('decider_alerte', { p_alerte: b.dataset.a, p_decision: b.dataset.al, p_motif: v.motif }); toast('Décision enregistrée.'); afficher(); compteurs(); } catch (e) { toast(messageErreur(e)); }
     });
     document.querySelectorAll('[data-abs]').forEach(b => b.onclick = async () => {
-      const v = await formulaire(b.dataset.abs === 'justifiee' ? 'Absence justifiée' : 'Absence non justifiée', [{ id: 'c', label: 'Commentaire pour le salarié (facultatif)', type: 'textarea' }], 'Confirmer');
+      const al1 = al.find(x => x.id === b.dataset.a), quoi = al1 && al1.type === 'retard' ? 'Retard' : 'Absence';
+      const titres = { justifiee: quoi + (quoi === 'Absence' ? ' justifiée' : ' justifié'), injustifiee: quoi + (quoi === 'Absence' ? ' non justifiée' : ' non justifié'), prevenu: quoi + ' : le salarié avait prévenu' };
+      const v = await formulaire(titres[b.dataset.abs], [{ id: 'c', label: 'Commentaire pour le salarié (facultatif)', type: 'textarea' }], 'Confirmer', 'L’alerte reste dans l’historique avec cette décision ; le salarié la voit dans ses notifications.');
       if (!v) return;
       try { await sb.rpc('decider_absence', { p_alerte: b.dataset.a, p_statut: b.dataset.abs, p_commentaire: v.c }); toast('Décision enregistrée.'); afficher(); compteurs(); } catch (e) { toast(messageErreur(e)); }
     });
@@ -583,11 +594,18 @@
     const sal = await sb.lire('salaries', { select: '*', etab_id: 'eq.' + etabId, order: 'actif.desc,prenom' });
     const mem = await sb.lire('membres', { select: 'salarie_id,actif,role', etab_id: 'eq.' + etabId });
     const avecCode = await sb.rpc('salaries_avec_code', { p_etab: etabId }).catch(() => null);
+    // codes visibles en permanence par le dirigeant (comme la v16) ; un code créé avant ce réglage n'existe que chiffré
+    const codes = Object.fromEntries((await sb.rpc('codes_etab', { p_etab: etabId }).catch(() => [])).map(c => [c.salarie_id, c.code]));
+    const exemples = sal.filter(s => s.exemple);
+    const celluleCode = s => !avecCode ? '' : codes[s.id] ? `<b class="nw" style="letter-spacing:.15em">${esc(codes[s.id])}</b>`
+      : avecCode.includes(s.id) ? '<span class="etiquette">défini, à régénérer pour l’afficher</span>' : '<span class="etiquette mauvais">à définir</span>';
     const compte = s => { const m = mem.find(x => x.salarie_id === s.id); return !m ? '<span class="etiquette mauvais">aucun compte</span>' : m.actif ? '<span class="etiquette bon">compte actif ou invité</span>' : '<span class="etiquette">compte désactivé</span>'; };
-    $('#vue').innerHTML = `<div class="ligne entre"><h2 style="margin:0">Équipe <span class="doux petit">${sal.filter(s => s.actif).length} actifs</span></h2><button class="bouton" id="nouveau">Ajouter un salarié</button></div>
+    $('#vue').innerHTML = `<div class="ligne entre"><h2 style="margin:0">Équipe <span class="doux petit">${sal.filter(s => s.actif).length} actifs</span></h2><div class="ligne">
+        ${exemples.some(s => s.actif) ? '<button class="bouton danger petit" id="retirerEx">Retirer les exemples</button>' : '<button class="bouton discret petit" id="chargerEx">Remplir avec un exemple</button>'}
+        <button class="bouton" id="nouveau">Ajouter un salarié</button></div></div>
       <div class="carte"><div class="defile"><table class="tableau"><thead><tr><th>Salarié</th><th>Contact</th><th>Poste</th><th>Contrat</th><th>Code</th><th>Compte</th><th>État</th><th></th></tr></thead><tbody>
-      ${sal.map(s => `<tr><td><b>${esc(nomS(s))}</b></td><td class="petit">${esc(s.email || '')}<br><span class="doux">${esc(s.telephone || '')}</span></td><td>${esc(s.poste || '')}</td><td class="nw">${s.contrat_heures ? esc(+s.contrat_heures) + ' h / sem.' : '—'}</td>
-        <td>${avecCode ? (avecCode.includes(s.id) ? '<span class="etiquette bon">défini</span>' : '<span class="etiquette mauvais">à définir</span>') : ''}</td><td>${compte(s)}</td>
+      ${sal.map(s => `<tr><td><b>${esc(nomS(s))}</b>${s.exemple ? ' <span class="etiquette alerte">exemple</span>' : ''}</td><td class="petit">${esc(s.email || '')}<br><span class="doux">${esc(s.telephone || '')}</span></td><td>${esc(s.poste || '')}</td><td class="nw">${s.contrat_heures ? esc(+s.contrat_heures) + ' h / sem.' : '—'}</td>
+        <td>${celluleCode(s)}</td><td>${compte(s)}</td>
         <td>${s.actif ? '<span class="etiquette bon">Actif</span>' : `<span class="etiquette">Archivé, départ le ${esc(s.depart_le ? R.fNum(s.depart_le) : '?')}</span>`}</td>
         <td><div class="ligne">${s.actif ? `<button class="bouton discret petit" data-a="fiche" data-s="${s.id}">Modifier</button><button class="bouton discret petit" data-a="code" data-s="${s.id}">Code</button>
           <button class="bouton second petit" data-a="inviter" data-s="${s.id}">Inviter par e-mail</button><button class="bouton discret petit" data-a="lien_invitation" data-s="${s.id}">Lien d'activation</button>
@@ -603,7 +621,18 @@
       { id: 'dispo', label: 'Disponibilités et préférences (lues par l’assistant planning)', type: 'textarea', valeur: s ? s.disponibilites : '' }];
     const ligneFiche = v => ({ prenom: v.prenom, nom: v.nom, email: v.email || null, telephone: v.telephone || null, poste: v.poste || null, contrat_heures: v.contrat ? Number(v.contrat) : null, disponibilites: v.dispo });
     const genererCode = () => { for (let i = 0; i < 200; i++) { const c = String(1000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 9000)); if (!/^(\d)\1{3}$/.test(c) && !'0123456789'.includes(c) && !'9876543210'.includes(c) && !/^(\d\d)\1$/.test(c)) return c; } return ''; };
-    const afficherCode = (s, code) => { const l = $('#lien'); l.classList.remove('cache'); l.innerHTML = code ? `Code de pointage de <b>${esc(s.prenom)}</b> : <b style="font-size:1.3rem;letter-spacing:.2em">${esc(code)}</b><br>Notez-le et remettez-le en main propre : il ne sera plus affiché (il est gardé chiffré).` : 'Code non créé : utilisez le bouton « Code ».'; };
+    const afficherCode = (s, code) => { const l = $('#lien'); l.classList.remove('cache'); l.innerHTML = code ? `Code de pointage de <b>${esc(s.prenom)}</b> : <b style="font-size:1.3rem;letter-spacing:.2em">${esc(code)}</b><br>Remettez-le en main propre. Il reste visible pour vous dans la colonne « Code ».` : 'Code non créé : utilisez le bouton « Code ».'; };
+    // Exemple (comme la v16) : 4 salariés fictifs et une semaine en brouillon, retirés en un clic.
+    if ($('#chargerEx')) $('#chargerEx').onclick = async () => {
+      const v = await formulaire('Remplir avec un exemple', [], 'Charger l’exemple', 'Ajoute 4 salariés fictifs (marqués « exemple », sans code ni compte) et leur planning de la semaine prochaine, en brouillon : rien n’est publié ni visible des salariés. « Retirer les exemples » les efface en un clic ; les vrais salariés ne sont pas touchés.');
+      if (!v) return;
+      try { const n = await sb.rpc('charger_exemple', { p_etab: etabId }); toast(n + ' salariés d’exemple ajoutés. Planning de la semaine prochaine en brouillon.'); afficher(); } catch (x) { toast(messageErreur(x)); }
+    };
+    if ($('#retirerEx')) $('#retirerEx').onclick = async () => {
+      const v = await formulaire('Retirer les exemples', [], 'Retirer', `Efface les ${exemples.filter(s => s.actif).length} salariés d’exemple et leur planning. Un exemple qui a déjà pointé est archivé au lieu d’être effacé, pour garder l’historique. Les vrais salariés ne sont pas touchés.`);
+      if (!v) return;
+      try { const r = await sb.rpc('retirer_exemple', { p_etab: etabId }); toast(`Exemples retirés : ${r.supprimees} effacé(s)${r.archivees ? ', ' + r.archivees + ' archivé(s)' : ''}.`); afficher(); } catch (x) { toast(messageErreur(x)); }
+    };
     $('#nouveau').onclick = async () => {
       const v = await formulaire('Nouveau salarié', champsFiche(null), 'Ajouter'); if (!v) return;
       try {
@@ -620,7 +649,7 @@
           await sb.modifier('salaries', { id: 'eq.' + id }, { ...ligneFiche(v), maj_le: new Date().toISOString() }); toast('Fiche enregistrée.'); afficher();
         } else if (a === 'code') {
           const v = await formulaire('Code de pointage de ' + s.prenom, [{ id: 'code', label: 'Nouveau code (4 à 6 chiffres) — laissez vide pour en générer un', type: 'text', attr: 'inputmode="numeric" pattern="[0-9]{4,6}" autocomplete="off"' }], 'Enregistrer',
-            'Le code n’est affiché qu’une fois puis gardé chiffré : remettez-le au salarié en main propre. Les codes trop simples ou déjà utilisés sont refusés.');
+            'Le code reste visible pour vous seul dans la colonne « Code » : remettez-le au salarié en main propre. Les codes trop simples ou déjà utilisés sont refusés.');
           if (!v) return; const c = v.code || genererCode(); await sb.rpc('definir_code_pointage', { p_salarie: id, p_code: c }); await afficher(); afficherCode(s, c);
         } else if (a === 'desactiver' || a === 'reactiver') {
           const v = await formulaire(a === 'desactiver' ? 'Archiver ' + s.prenom + ' (départ)' : 'Réactiver ' + s.prenom,
@@ -690,6 +719,13 @@
       <div class="defile"><table class="tableau"><tbody>${Object.entries(R.RULES).map(([k, x]) => `<tr><td>${esc(x.label)}</td><td style="width:180px"><select id="rl-${k}"><option value="bad" ${(niveaux[k] || x.def) === 'bad' ? 'selected' : ''}>Interdiction</option><option value="warn" ${(niveaux[k] || x.def) === 'warn' ? 'selected' : ''}>Avertissement</option></select></td></tr>`).join('')}</tbody></table></div>
       <h2 style="margin:8px 0 0">Espace salarié</h2>
       <label class="ligne petit"><input type="checkbox" id="espace" ${r.espace_salarie === false ? '' : 'checked'}> Espace salarié activé (désactivé : les salariés ne peuvent plus rien lire ; la base l'applique)</label>
+      <h2 style="margin:8px 0 0">Photo au pointage</h2>
+      ${r.photo_active && !(r.photo_raison || '').trim() ? '<div class="message erreur">La photo est activée sans raison indiquée : elle n’est pas prise tant qu’une raison n’est pas renseignée.</div>' : ''}
+      <label class="ligne petit"><input type="checkbox" id="phAct" ${r.photo_active ? 'checked' : ''}> Prendre une photo du salarié à chaque pointage sur la tablette (désactivé par défaut)</label>
+      <div class="grille2"><label class="champ">Raison (obligatoire pour activer ; affichée sur la tablette)<input type="text" id="phRaison" maxlength="160" value="${esc(r.photo_raison || '')}" placeholder="Ex. vérifier que chacun pointe pour lui-même"></label>
+        <label class="champ">Durée de conservation<select id="phJours">${[7, 30, 60, 90].map(n => `<option value="${n}" ${(r.photo_conservation_jours || 60) === n ? 'selected' : ''}>${n} jours</option>`).join('')}</select></label></div>
+      <label class="ligne petit"><input type="checkbox" id="phOblig" ${r.photo_obligatoire ? 'checked' : ''}> Photo obligatoire (sinon, le salarié peut cocher « Pointer sans photo »)</label>
+      <p class="doux petit" style="margin:0">La photo d'un salarié est une donnée personnelle. Avant d'activer : informez les salariés (finalité, durée, destinataire), consultez le CSE s'il existe et inscrivez ce traitement à votre registre. N'activez la photo que si elle est nécessaire au but indiqué. Les photos ne sont visibles que des dirigeants, ne sont jamais envoyées par e-mail et sont effacées automatiquement chaque nuit après la durée choisie (elles figurent dans les sauvegardes tant qu'elles sont conservées).</p>
       <div id="msg" class="message cache"></div><button class="bouton" type="submit">Enregistrer les réglages</button></form>
       <div class="carte pile"><h2 style="margin:0">Code de la pointeuse</h2><p class="doux petit" style="margin:0">Ce code permet de quitter le mode pointeuse sur la tablette. ${codeSortie ? '<span class="etiquette bon">défini</span>' : '<span class="etiquette alerte">non défini : la tablette se déconnecte par un appui long de 3 secondes</span>'}</p>
         <div class="ligne"><input type="password" id="cs1" inputmode="numeric" autocomplete="off" placeholder="Nouveau code (4 à 8 chiffres)" style="width:auto"><input type="password" id="cs2" inputmode="numeric" autocomplete="off" placeholder="Confirmation" style="width:auto"><button class="bouton second petit" id="csOk">Changer le code</button></div></div>
@@ -764,7 +800,9 @@
         const nv = { ...r, couleur: $('#couleur').value, couleur_titres: $('#couleurT').value, adresse: $('#adresse').value.trim(), code_postal: $('#cp').value.trim(), ville: $('#ville').value.trim(),
           telephone: $('#tel').value.trim(), email: $('#mailE').value.trim(), postes: $('#postes').value.split(',').map(x => x.trim()).filter(Boolean), services_types: services,
           notifier_absences: $('#nAbs').checked, notifier_retards: $('#nRet').checked, modele_retard: $('#mRet').value.trim(), modele_absence: $('#mAbs').value.trim(),
-          tolerance_min: Number($('#tol').value || 5), delai_justificatif_h: Number($('#delai').value || 48), alerte_par_service: $('#parService').value === 'oui', regles_niveaux: niv, espace_salarie: $('#espace').checked };
+          tolerance_min: Number($('#tol').value || 5), delai_justificatif_h: Number($('#delai').value || 48), alerte_par_service: $('#parService').value === 'oui', regles_niveaux: niv, espace_salarie: $('#espace').checked,
+          photo_active: $('#phAct').checked, photo_raison: $('#phRaison').value.trim(), photo_obligatoire: $('#phOblig').checked, photo_conservation_jours: Number($('#phJours').value) };
+        if (nv.photo_active && nv.photo_raison.length < 5) { m.textContent = 'Indiquez la raison de la photo au pointage avant de l’activer.'; m.className = 'message erreur'; return; }
         const f = $('#logoFichier').files[0];
         if (f) nv.logo = await reduireImage(f, 256);
         if ($('#sansLogo') && $('#sansLogo').checked) delete nv.logo;

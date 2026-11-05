@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mon espace — Portail de pointage</title>
-<link rel="stylesheet" href="assets/style.css?v=7">
+<link rel="stylesheet" href="assets/style.css?v=8">
 </head>
 <body>
 <header class="tete">
@@ -23,10 +23,10 @@
 </header>
 <main class="enveloppe"><div class="pile" id="vue"><p class="doux">Chargement…</p></div></main>
 
-<script src="assets/config.js?v=7"></script>
-<script src="assets/sb.js?v=7"></script>
-<script src="assets/commun.js?v=7"></script>
-<script src="assets/releve.js?v=7"></script>
+<script src="assets/config.js?v=8"></script>
+<script src="assets/sb.js?v=8"></script>
+<script src="assets/commun.js?v=8"></script>
+<script src="assets/releve.js?v=8"></script>
 <script>
 (async function () {
   const { $, esc, heure, dateLongue, dateCourte, ajouterJours, lundi, aujourdhui, hm, duree, messageErreur, toast } = P;
@@ -38,7 +38,7 @@
   $('#qui').textContent = fiche ? fiche.prenom + ' ' + fiche.nom : '';
   $('#deco').onclick = async () => { await sb.deconnexion(); location.replace('index.html'); };
 
-  let onglet = 'planning', semaine = lundi(aujourdhui());
+  let onglet = 'planning', semaine = lundi(aujourdhui()), vueEquipe = false;
   document.querySelectorAll('#onglets button').forEach(b => b.onclick = () => {
     onglet = b.dataset.o;
     document.querySelectorAll('#onglets button').forEach(x => x.setAttribute('aria-selected', x === b));
@@ -69,12 +69,41 @@
   }
 
   // ---------- Planning publié (les brouillons ne sont jamais transmis par la base)
+  const basculeEquipe = () => `<div class="ligne" role="group" aria-label="Affichage" style="margin-top:8px">
+      <button class="bouton petit ${vueEquipe ? 'discret' : ''}" data-equipe="0" aria-pressed="${!vueEquipe}">Mon planning</button>
+      <button class="bouton petit ${vueEquipe ? '' : 'discret'}" data-equipe="1" aria-pressed="${vueEquipe}">Toute l'équipe</button></div>`;
+  const brancherEquipe = () => document.querySelectorAll('[data-equipe]').forEach(b => b.onclick = () => { vueEquipe = b.dataset.equipe === '1'; afficher(); });
+
+  // Planning de toute l'équipe : semaine publiée seulement, prénom et initiale, horaires (comme la v16).
+  async function vuePlanningEquipe() {
+    const lignes = await sb.rpc('planning_equipe', { p_lundi: semaine });
+    const noms = [...new Map(lignes.map(l => [l.salarie_id, l])).values()];
+    const jours = [...Array(7)].map((_, i) => ajouterJours(semaine, i));
+    let html = `<div class="carte">${navSemaine('Planning de l’équipe')}${basculeEquipe()}</div>`;
+    if (!lignes.length) html += `<div class="carte"><p class="doux" style="margin:0">Aucun planning publié pour cette semaine.</p></div>`;
+    else {
+      html += `<div class="carte defile"><table class="tableau"><thead><tr><th>Salarié</th>${jours.map(j => `<th class="${j === aujourdhui() ? 'aujourdhui' : ''}">${esc(dateCourte(j))}</th>`).join('')}</tr></thead><tbody>`;
+      for (const n of noms) {
+        html += `<tr${n.salarie_id === moiId ? ' style="font-weight:600"' : ''}><td>${esc(n.nom)}${n.salarie_id === moiId ? ' <span class="doux petit">(vous)</span>' : ''}${n.poste ? '<br><span class="doux petit">' + esc(n.poste) + '</span>' : ''}</td>`;
+        for (const j of jours) {
+          const c = lignes.filter(l => l.salarie_id === n.salarie_id && l.jour === j);
+          html += `<td>${c.map(x => `${hm(x.debut)}–${hm(x.fin)}${x.poste_creneau && x.poste_creneau !== n.poste ? ' <span class="doux petit">' + esc(x.poste_creneau) + '</span>' : ''}`).join('<br>') || '<span class="doux">–</span>'}</td>`;
+        }
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+    }
+    html += `<p class="doux petit">Seuls les horaires publiés sont visibles. Les congés, demandes et pointages de vos collègues ne vous sont jamais transmis.</p>`;
+    $('#vue').innerHTML = html; brancherNav(); brancherEquipe();
+  }
+
   async function vuePlanning() {
+    if (vueEquipe) return vuePlanningEquipe();
     const fin = ajouterJours(semaine, 6);
     const cr = await sb.lire('creneaux', { select: 'id,salarie_id,jour,debut,fin,poste,note,pause_min', salarie_id: 'eq.' + moiId, and: `(jour.gte.${semaine},jour.lte.${fin})`, order: 'jour,debut' });
     const [demandes] = [await sb.lire('demandes', { select: 'type,du,au,debut,fin,statut', salarie_id: 'eq.' + moiId, statut: 'eq.acceptee', du: 'lte.' + fin, au: 'gte.' + semaine })];
     const prevues = cr.reduce((m, x) => m + R.shiftMin(R.creneau(x)), 0);
-    let html = `<div class="carte">${navSemaine('Mon planning')}${cr.length ? `<p class="petit" style="margin:8px 0 0"><span class="etiquette bon">${R.fmtH(prevues)} prévues</span> (pauses prévues déduites)</p>` : ''}</div><div class="jours">`;
+    let html = `<div class="carte">${navSemaine('Mon planning')}${basculeEquipe()}${cr.length ? `<p class="petit" style="margin:8px 0 0"><span class="etiquette bon">${R.fmtH(prevues)} prévues</span> (pauses prévues déduites)</p>` : ''}</div><div class="jours">`;
     for (let i = 0; i < 7; i++) {
       const j = ajouterJours(semaine, i);
       const c = cr.filter(x => x.jour === j);
@@ -85,7 +114,7 @@
         ${!c.length && !conge.length ? '<span class="doux petit">Repos ou non planifié</span>' : ''}</div>`;
     }
     html += `</div><p class="doux petit">Seul le planning publié par votre responsable apparaît ici.</p>`;
-    $('#vue').innerHTML = html; brancherNav();
+    $('#vue').innerHTML = html; brancherNav(); brancherEquipe();
   }
 
   // ---------- Pointages et heures calculées automatiquement (même calcul que la v16 ; pas un calcul de paie)
@@ -130,7 +159,7 @@
         return `<div class="carte" style="${nonLu ? 'border-color:var(--accent)' : ''}"><div class="ligne entre"><div class="ligne"><span class="etiquette">${esc(m.categorie)}</span>${nonLu ? '<span class="etiquette alerte">Nouveau</span>' : ''}</div><span class="doux petit">${esc(new Date(m.cree_le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }))}</span></div>
           <h2 style="margin:6px 0">${esc(m.titre)}</h2>${m.du ? `<p class="petit num" style="margin:0">${m.au && m.au !== m.du ? `Du ${esc(dateCourte(m.du))} au ${esc(dateCourte(m.au))}` : `Le ${esc(dateCourte(m.du))}`}</p>` : ''}<p style="white-space:pre-wrap">${esc(m.corps)}</p><span class="doux petit">De la direction</span></div>`; }
       const d = docs.filter(x => x.alerte_id === a.id);
-      const etat = a.annulee ? '<span class="etiquette">annulée</span>' : a.statut === 'justifiee' ? '<span class="etiquette bon">absence justifiée</span>' : a.statut === 'injustifiee' ? '<span class="etiquette mauvais">absence non justifiée</span>' : a.statut === 'repondu' ? '<span class="etiquette bon">réponse envoyée</span>' : a.type === 'retard' ? '<span class="etiquette alerte">retard</span>' : '<span class="etiquette mauvais">en attente de réponse</span>';
+      const etat = a.annulee ? '<span class="etiquette">annulée</span>' : a.statut === 'justifiee' ? `<span class="etiquette bon">${a.type === 'retard' ? 'retard justifié' : 'absence justifiée'}</span>` : a.statut === 'injustifiee' ? `<span class="etiquette mauvais">${a.type === 'retard' ? 'retard non justifié' : 'absence non justifiée'}</span>` : a.statut === 'prevenu' ? '<span class="etiquette bon">prévenu</span>' : a.statut === 'repondu' ? '<span class="etiquette bon">réponse envoyée</span>' : a.type === 'retard' ? '<span class="etiquette alerte">retard</span>' : '<span class="etiquette mauvais">en attente de réponse</span>';
       return `<div class="carte" data-a="${a.id}"><div class="ligne entre"><h2 style="margin:0">${esc(a.titre)}</h2>${etat}</div>
         <p style="white-space:pre-wrap">${esc(a.corps)}</p>
         ${a.annulee ? `<p class="doux petit">Annulée : ${esc(a.motif_annulation || 'sans objet')}. Aucune réponse n'est nécessaire.</p>` : ''}
