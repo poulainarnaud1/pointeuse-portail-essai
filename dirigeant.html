@@ -186,7 +186,7 @@
     };
     $('#ia').onclick = async () => {
       const v = await formulaire('Proposition de planning par l\u2019IA', [{ id: 'consignes', label: 'Vos contraintes et consignes pour la semaine', type: 'textarea', requis: true }], 'Demander une proposition',
-        'Envoyé à Claude : pour chaque salarié un code (S1, S2…), son contrat, son poste et ses disponibilités, les congés validés de la semaine et vos consignes. Jamais les noms, coordonnées ou pointages. Rien n\u2019est appliqué sans votre accord.');
+        'Envoyé à Claude : pour chaque salarié un code (S1, S2…), son contrat, son poste et ses disponibilités, les congés validés de la semaine et vos consignes. Les prénoms et noms cités dans vos consignes sont remplacés par ces codes avant l\u2019envoi. Jamais de coordonnées ni de pointages. Rien n\u2019est appliqué sans votre accord.');
       if (!v) return;
       const zone = $('#propIA'); zone.innerHTML = '<div class="carte"><p class="doux">L\u2019IA prépare une proposition\u2026</p></div>';
       let p;
