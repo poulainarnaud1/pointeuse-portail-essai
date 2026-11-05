@@ -193,6 +193,9 @@
       try { p = await sb.fonction('planning-ia', { etab_id: etabId, lundi: semaine, consignes: v.consignes }); }
       catch (e) { zone.innerHTML = `<div class="message erreur">${esc(e.code === 'ia_non_configuree' ? 'L\u2019assistant n\u2019est pas encore activé (clé de l\u2019API Claude non installée). Le planning reste modifiable à la main.' : messageErreur(e) + ' Le planning reste modifiable à la main.')}</div>`; return; }
       const nomDe = id => { const s = sal.find(x => x.id === id); return s ? s.prenom + ' ' + s.nom : '?'; };
+      // Les codes S1, S2… renvoyés par l'IA sont remplacés par les prénoms, ici seulement, dans votre navigateur.
+      const lisible = t => String(t).replace(/\bS(\d+)\b/g, (m) => p.codes && p.codes[m] ? nomDe(p.codes[m]) : m);
+      p.questions_ouvertes = p.questions_ouvertes.map(lisible); p.remarques = p.remarques.map(lisible);
       zone.innerHTML = `<div class="carte pile"><h2 style="margin:0">Proposition de l\u2019IA (non appliquée)</h2>
         <div class="defile"><table class="tableau"><thead><tr><th>Salarié</th><th>Heures proposées (calcul du logiciel)</th><th>Contrat</th></tr></thead><tbody>
         ${sal.map(s => { const t = p.totaux_minutes[s.id] || 0, c = s.contrat_heures ? s.contrat_heures * 60 : null;
