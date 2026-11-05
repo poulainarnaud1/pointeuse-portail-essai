@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Espace dirigeant — Portail de pointage</title>
-<link rel="stylesheet" href="assets/style.css?v=9">
+<link rel="stylesheet" href="assets/style.css?v=10">
 </head>
 <body>
 <header class="tete">
@@ -28,10 +28,10 @@
 </header>
 <main class="enveloppe"><div class="pile" id="vue"><p class="doux">Chargement…</p></div></main>
 
-<script src="assets/config.js?v=9"></script>
-<script src="assets/sb.js?v=9"></script>
-<script src="assets/commun.js?v=9"></script>
-<script src="assets/releve.js?v=9"></script>
+<script src="assets/config.js?v=10"></script>
+<script src="assets/sb.js?v=10"></script>
+<script src="assets/commun.js?v=10"></script>
+<script src="assets/releve.js?v=10"></script>
 <script>
 (async function () {
   const { $, esc, heure, dateCourte, dateLongue, ajouterJours, lundi, aujourdhui, hm, duree, messageErreur, toast, formulaire, fenetre } = P;
@@ -745,7 +745,7 @@
         <li>Pour quitter le mode pointeuse, touchez « Quitter » en bas de l'écran et saisissez le code de la pointeuse.</li></ol></div>`;
     sb.fonction('sauvegarde', { action: 'etat', etab_id: etabId }).then(e => {
       const d = (e.suivi || []).find(x => x.type === 'automatique');
-      $('#etatSauv').innerHTML = (d ? `Dernière sauvegarde automatique : ${esc(new Date(d.le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }))} — ${d.ok ? 'réussie' : '<b style="color:var(--mauvais)">échec : ' + esc(d.erreur || '') + '</b>'}` : 'Aucune sauvegarde automatique pour l’instant.')
+      $('#etatSauv').innerHTML = (d ? `Dernière sauvegarde automatique : ${esc(new Date(d.le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }))} — ${d.ok ? 'réussie, complète' : d.complete === false ? '<b style="color:var(--mauvais)">INCOMPLÈTE : ' + esc(d.erreur || '') + '</b>' : '<b style="color:var(--mauvais)">échec : ' + esc(d.erreur || '') + '</b>'}` : 'Aucune sauvegarde automatique pour l’instant.')
         + `<br>Copie hors de la base principale : ${e.externe_configure ? 'oui (stockage externe)' : '<b>non configurée</b> (espace privé du projet seulement)'} · chiffrement : ${e.chiffrement_configure ? 'oui' : '<b>non configuré</b>'}`;
     }).catch(x => { $('#etatSauv').textContent = messageErreur(x); });
     sb.rpc('etat_service', { p_etab: etabId }).then(s => {
@@ -772,9 +772,16 @@
     $('#telecharger').onclick = async () => {
       try {
         const res = await sb.fonction('sauvegarde', { action: 'telecharger', etab_id: etabId });
+        // Sauvegarde incomplète : jamais présentée comme complète ; téléchargée seulement après avertissement, et nommée comme telle.
+        if (res.complete === false) {
+          const m = res.fichiers_manquants || [];
+          const v = await formulaire('Sauvegarde INCOMPLÈTE', [], 'Télécharger quand même',
+            `${m.length} fichier(s) n'ont pas pu être lus et ne sont PAS dans cette sauvegarde : ${m.slice(0, 5).map(x => x.chemin.split('/').pop() + ' (' + x.raison + ')').join(' ; ')}${m.length > 5 ? '…' : ''}. Les données (pointages, planning, salariés…) sont complètes. Le fichier sera nommé « INCOMPLETE ».`);
+          if (!v) return;
+        }
         const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(res.archive)], { type: 'application/json' }));
-        a.download = `sauvegarde-${(etab.nom || 'etablissement').replace(/[^\w-]+/g, '-')}-${new Date().toISOString().slice(0, 16).replace(':', 'h')}.json`; a.click();
-        toast('Sauvegarde téléchargée.');
+        a.download = `sauvegarde-${(etab.nom || 'etablissement').replace(/[^\w-]+/g, '-')}-${new Date().toISOString().slice(0, 16).replace(':', 'h')}${res.complete === false ? '-INCOMPLETE' : ''}.json`; a.click();
+        toast(res.complete === false ? 'Sauvegarde INCOMPLÈTE téléchargée.' : 'Sauvegarde complète téléchargée.');
       } catch (x) { toast(messageErreur(x)); }
     };
     $('#fichierRest').onchange = async e => {
@@ -787,10 +794,19 @@
         `Établissement : ${archive.etab && archive.etab.nom}. Salariés, planning, demandes, alertes, messages et justificatifs reviendront à leur état de cette date. Le journal n’est jamais effacé.`);
       if (!v) return;
       if (v.conf !== 'RESTAURER') return toast('Confirmation incorrecte : rien n’a été fait.');
+      const corps = { action: 'restaurer', etab_id: etabId, archive, confirmation: 'RESTAURER', conserver_pointages: v.conserver };
+      const compteRendu = res => `Restauration faite${res.complete ? '' : ', SANS ' + res.fichiers.absents_de_l_archive + ' fichier(s) absent(s) de la sauvegarde'}. Pointages récents conservés : ${res.pointages_recents_conserves}. Fichiers renvoyés : ${res.fichiers.remis}, déjà présents et identiques : ${res.fichiers.presents_identiques}.`;
       try {
-        const res = await sb.fonction('sauvegarde', { action: 'restaurer', etab_id: etabId, archive, confirmation: 'RESTAURER', conserver_pointages: v.conserver });
-        toast(`Restauration faite. Pointages récents conservés : ${res.pointages_recents_conserves}. Fichiers renvoyés : ${res.fichiers.remis}.`); await rechargerEtab(); afficher();
-      } catch (x) { toast(messageErreur(x)); }
+        const res = await sb.fonction('sauvegarde', corps);
+        toast(compteRendu(res)); await rechargerEtab(); afficher();
+      } catch (x) {
+        if (x.code !== 'archive_incomplete') return toast(messageErreur(x));
+        // sauvegarde incomplète : restauration possible seulement sur confirmation explicite
+        const w = await formulaire('Sauvegarde incomplète', [{ id: 'c', label: 'Tapez SANS FICHIERS pour restaurer quand même', requis: true }], 'Restaurer sans ces fichiers', messageErreur(x));
+        if (!w || w.c !== 'SANS FICHIERS') return toast('Rien n’a été fait.');
+        try { const res = await sb.fonction('sauvegarde', { ...corps, accepter_incomplete: true }); toast(compteRendu(res)); await rechargerEtab(); afficher(); }
+        catch (y) { toast(messageErreur(y)); }
+      }
     };
     $('#fr').onsubmit = async e => {
       e.preventDefault(); const m = $('#msg');
